@@ -314,7 +314,7 @@ void SpectrogramPlot::getLine(float *dest, size_t sample)
             buffer[i] *= window[i];
         }
 
-        fft->process(buffer.get(), buffer.get());
+        fft->process(reinterpret_cast<fftwf_complex*>(buffer.get()), reinterpret_cast<fftwf_complex*>(buffer.get()));
         const float invFFTSize = 1.0f / fftSize;
         const float logMultiplier = 10.0f / log2f(10.0f);
         for (int i = 0; i < fftSize; i++) {
