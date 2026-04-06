@@ -1,0 +1,12 @@
+{
+  "name": "inspectrum",
+  "version-string": "0.4.0",
+  "dependencies": [
+    "fftw3",
+    {
+      "name": "qt5-base",
+      "default-features": false
+    }
+  ],
+  "builtin-baseline": "1765cad8e278cf360209361045ee510d2b329f11"
+}
