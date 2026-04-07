@@ -18,12 +18,15 @@ Install inspectrum with your package manager, it should be present in most distr
  * [Homebrew](https://formulae.brew.sh/formula/inspectrum)
  * [MacPorts](https://ports.macports.org/port/inspectrum/)
 
-## Windows
+### Windows
  * [radioconda](https://github.com/ryanvolz/radioconda)
  * [conda](https://anaconda.org/conda-forge/inspectrum)
 
 ## Build from source
-### Prerequisites
+
+### Linux / macOS
+
+#### Prerequisites
 
  * cmake >= 3.1
  * fftw 3.x
@@ -31,13 +34,47 @@ Install inspectrum with your package manager, it should be present in most distr
  * pkg-config
  * qt5
 
-### Build instructions
+#### Build instructions
 
 Build instructions can be found here: https://github.com/miek/inspectrum/wiki/Build
 
-### Run
+#### Run
 
     ./inspectrum [filename]
+
+### Windows (MSVC + vcpkg)
+
+#### Prerequisites
+
+ * [Visual Studio 2022](https://visualstudio.microsoft.com/) with the **Desktop development with C++** workload
+ * [CMake](https://cmake.org/download/) >= 3.11
+ * [Git](https://git-scm.com/download/win)
+ * [vcpkg](https://github.com/microsoft/vcpkg) — follow the [Getting Started](https://learn.microsoft.com/en-us/vcpkg/get_started/get-started) guide to bootstrap it
+
+Set the `VCPKG_ROOT` environment variable to your vcpkg install location:
+
+    set VCPKG_ROOT=C:\path\to\vcpkg
+
+#### Build instructions
+
+Configure and build using the included CMake preset:
+
+    cmake --preset windows
+    cmake --build build --config RelWithDebInfo
+
+The first configure will download and build Qt5 and FFTW from source via vcpkg (this takes ~30 minutes on first run). Prebuilt [liquid-dsp](https://github.com/jgaeddert/liquid-dsp) binaries are fetched automatically via CMake FetchContent.
+
+#### Install
+
+Collect the executable and all required DLLs into a self-contained directory:
+
+    cmake --install build --prefix build/install --config RelWithDebInfo
+
+The output will be in `build\install\bin\` and can be run directly or copied anywhere.
+
+#### Run
+
+    build\install\bin\inspectrum.exe [filename]
 
 ## Input
 inspectrum supports the following file types:
