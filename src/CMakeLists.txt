@@ -84,6 +84,40 @@ set(INSTALL_DEFAULT_BINDIR "bin" CACHE STRING "Appended to CMAKE_INSTALL_PREFIX"
 
 install(TARGETS inspectrum RUNTIME DESTINATION ${INSTALL_DEFAULT_BINDIR})
 
+# On Windows, collect all required DLLs alongside the executable so the
+# install prefix is a self-contained, runnable directory.
+if (MSVC)
+    # Qt5 DLLs (only the modules we actually use)
+    if (Qt5_FOUND)
+        get_target_property(_qt5core_loc Qt5::Core LOCATION)
+        get_filename_component(_qt5_bindir "${_qt5core_loc}" DIRECTORY)
+        install(FILES
+            "${_qt5_bindir}/Qt5Core.dll"
+            "${_qt5_bindir}/Qt5Gui.dll"
+            "${_qt5_bindir}/Qt5Widgets.dll"
+            "${_qt5_bindir}/Qt5Concurrent.dll"
+            DESTINATION ${INSTALL_DEFAULT_BINDIR})
+        # Qt platform plugin (required for any Qt GUI app on Windows)
+        get_filename_component(_qt5_prefix "${_qt5_bindir}" DIRECTORY)
+        install(FILES "${_qt5_prefix}/plugins/platforms/qwindows.dll"
+            DESTINATION "${INSTALL_DEFAULT_BINDIR}/platforms")
+    endif()
+
+    # FFTW DLL - derive from include path (works for both vcpkg and manual)
+    if (FFTW_INCLUDES)
+        get_filename_component(_fftw_prefix "${FFTW_INCLUDES}" DIRECTORY)
+        if (EXISTS "${_fftw_prefix}/bin/fftw3f.dll")
+            install(FILES "${_fftw_prefix}/bin/fftw3f.dll"
+                DESTINATION ${INSTALL_DEFAULT_BINDIR})
+        endif()
+    endif()
+
+    # LiquidDSP DLL
+    if (LIQUIDDSP_DLL)
+        install(FILES "${LIQUIDDSP_DLL}" DESTINATION ${INSTALL_DEFAULT_BINDIR})
+    endif()
+endif()
+
 # Create uninstall target
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in
