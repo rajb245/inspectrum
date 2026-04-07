@@ -87,15 +87,29 @@ install(TARGETS inspectrum RUNTIME DESTINATION ${INSTALL_DEFAULT_BINDIR})
 # On Windows, collect all required DLLs alongside the executable so the
 # install prefix is a self-contained, runnable directory.
 if (MSVC)
-    # Qt5 DLLs (only the modules we actually use)
+    # Qt5 DLLs and their transitive dependencies
     if (Qt5_FOUND)
         get_target_property(_qt5core_loc Qt5::Core LOCATION)
         get_filename_component(_qt5_bindir "${_qt5core_loc}" DIRECTORY)
         install(FILES
+            # Qt5 modules
             "${_qt5_bindir}/Qt5Core.dll"
             "${_qt5_bindir}/Qt5Gui.dll"
             "${_qt5_bindir}/Qt5Widgets.dll"
             "${_qt5_bindir}/Qt5Concurrent.dll"
+            # Qt5Core deps
+            "${_qt5_bindir}/zlib1.dll"
+            "${_qt5_bindir}/double-conversion.dll"
+            "${_qt5_bindir}/pcre2-16.dll"
+            # Qt5Gui deps
+            "${_qt5_bindir}/libpng16.dll"
+            "${_qt5_bindir}/harfbuzz.dll"
+            "${_qt5_bindir}/md4c.dll"
+            # harfbuzz -> freetype -> brotli chain
+            "${_qt5_bindir}/freetype.dll"
+            "${_qt5_bindir}/bz2.dll"
+            "${_qt5_bindir}/brotlidec.dll"
+            "${_qt5_bindir}/brotlicommon.dll"
             DESTINATION ${INSTALL_DEFAULT_BINDIR})
         # Qt platform plugin (required for any Qt GUI app on Windows)
         get_filename_component(_qt5_prefix "${_qt5_bindir}" DIRECTORY)
