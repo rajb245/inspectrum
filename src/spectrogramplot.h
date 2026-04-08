@@ -20,6 +20,9 @@
 #pragma once
 
 #include <QCache>
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
+#include <QOpenGLShaderProgram>
 #include <QString>
 #include <QWidget>
 #include "fft.h"
@@ -30,6 +33,7 @@
 
 #include <memory>
 #include <array>
+#include <map>
 #include <math.h>
 #include <vector>
 
@@ -125,6 +129,24 @@ private:
     int linesPerTile();
     void paintFrequencyScale(QPainter &painter, QRect &rect);
     void paintAnnotations(QPainter &painter, QRect &rect, range_t<size_t> sampleRange);
+
+    // OpenGL accelerated spectrogram rendering
+    bool glInitialized = false;
+    bool glFailed = false;
+    QOpenGLShaderProgram *glShader = nullptr;
+    GLuint glColormapTex = 0;
+    GLuint glQuadVBO = 0;
+    std::map<size_t, GLuint> glTileTextures;
+    int glCacheFftSize = 0;
+    int glCacheZoomLevel = 0;
+    int glCacheNfftSkip = 0;
+    bool glTileCacheDirty = false;
+
+    bool initGL(QOpenGLFunctions *f);
+    void paintMidGL(QPainter &painter, QRect &rect, range_t<size_t> sampleRange);
+    void paintMidCPU(QPainter &painter, QRect &rect, range_t<size_t> sampleRange);
+    GLuint getOrCreateGLTile(QOpenGLFunctions *f, size_t tile);
+    void clearGLTileCache(QOpenGLFunctions *f);
 };
 
 class AnnotationLocation

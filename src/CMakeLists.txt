@@ -52,10 +52,11 @@ list(APPEND inspectrum_sources
     util.cpp
 )
 
-find_package(Qt6 COMPONENTS Core Concurrent Widgets)
+find_package(Qt6 COMPONENTS Core Concurrent Widgets OpenGL)
 if (NOT Qt6_FOUND)
-    find_package(Qt5 REQUIRED COMPONENTS Core Concurrent Widgets)
+    find_package(Qt5 REQUIRED COMPONENTS Core Concurrent Widgets OpenGL)
 endif()
+find_package(OpenGL REQUIRED)
 find_package(FFTW REQUIRED)
 find_package(Liquid REQUIRED)
 
@@ -68,13 +69,15 @@ add_executable(inspectrum ${EXE_ARGS} ${inspectrum_sources})
 
 if (Qt6_FOUND)
     target_link_libraries(inspectrum
-        Qt6::Core Qt6::Widgets Qt6::Concurrent
+        Qt6::Core Qt6::Widgets Qt6::Concurrent Qt6::OpenGL
+        OpenGL::GL
         ${FFTW_LIBRARIES}
         ${LIQUID_LIBRARIES}
     )
 else()
     target_link_libraries(inspectrum
-        Qt5::Core Qt5::Widgets Qt5::Concurrent
+        Qt5::Core Qt5::Widgets Qt5::Concurrent Qt5::OpenGL
+        OpenGL::GL
         ${FFTW_LIBRARIES}
         ${LIQUID_LIBRARIES}
     )
@@ -83,6 +86,15 @@ endif()
 set(INSTALL_DEFAULT_BINDIR "bin" CACHE STRING "Appended to CMAKE_INSTALL_PREFIX")
 
 install(TARGETS inspectrum RUNTIME DESTINATION ${INSTALL_DEFAULT_BINDIR})
+
+# Standalone benchmark for profiling the DSP hot-paths (no Qt GUI needed)
+add_executable(inspectrum_bench benchmark.cpp fft.cpp)
+target_include_directories(inspectrum_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if (MSVC)
+    target_compile_definitions(inspectrum_bench PRIVATE _USE_MATH_DEFINES)
+endif()
+target_include_directories(inspectrum_bench PRIVATE ${FFTW_INCLUDES})
+target_link_libraries(inspectrum_bench ${FFTW_LIBRARIES})
 
 # On Windows, collect all required DLLs alongside the executable so the
 # install prefix is a self-contained, runnable directory.

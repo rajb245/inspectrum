@@ -32,6 +32,52 @@
 #include <limits>
 #include "util.h"
 
+// GL format constants (may not be in GL 1.1 headers)
+#ifndef GL_R32F
+#define GL_R32F 0x822E
+#endif
+#ifndef GL_RED
+#define GL_RED 0x1903
+#endif
+
+// ---------------------------------------------------------------------------
+// GLSL shaders for GPU-accelerated colormap rendering
+// ---------------------------------------------------------------------------
+static const char *glVertSrc = R"(
+    attribute vec2 aPos;
+    uniform vec2 uDstPos;
+    uniform vec2 uDstSize;
+    uniform vec2 uViewport;
+    uniform vec2 uTexMin;
+    uniform vec2 uTexMax;
+    varying vec2 vTexCoord;
+    void main() {
+        vec2 pixel = uDstPos + aPos * uDstSize;
+        gl_Position = vec4(
+            2.0 * pixel.x / uViewport.x - 1.0,
+            1.0 - 2.0 * pixel.y / uViewport.y,
+            0.0, 1.0
+        );
+        vTexCoord = uTexMin + aPos * (uTexMax - uTexMin);
+    }
+)";
+
+static const char *glFragSrc = R"(
+    varying highp vec2 vTexCoord;
+    uniform sampler2D uFFTData;
+    uniform sampler2D uColormap;
+    uniform highp float uPowerMax;
+    uniform highp float uPowerRange;
+    void main() {
+        // Texture is width=fftSize, height=linesPerTile.
+        // vTexCoord.x = time fraction, vTexCoord.y = frequency fraction.
+        // Swap to (freq, time) to match the transposed memory layout.
+        highp float power = texture2D(uFFTData, vec2(vTexCoord.y, vTexCoord.x)).r;
+        highp float norm = clamp((power - uPowerMax) * uPowerRange, 0.0, 1.0);
+        gl_FragColor = texture2D(uColormap, vec2(norm, 0.5));
+    }
+)";
+
 
 SpectrogramPlot::SpectrogramPlot(std::shared_ptr<SampleSource<std::complex<float>>> src) : Plot(src), inputSource(src), fftSize(512), tuner(fftSize, this)
 {
@@ -62,6 +108,7 @@ void SpectrogramPlot::invalidateEvent()
 
     pixmapCache.clear();
     fftCache.clear();
+    glTileCacheDirty = true;
     emit repaint();
 }
 
@@ -233,6 +280,18 @@ void SpectrogramPlot::paintMid(QPainter &painter, QRect &rect, range_t<size_t> s
     if (!inputSource || inputSource->count() == 0)
         return;
 
+    // Use OpenGL accelerated path if a GL context is available
+    if (QOpenGLContext::currentContext() && !glFailed) {
+        paintMidGL(painter, rect, sampleRange);
+        return;
+    }
+
+    // CPU fallback
+    paintMidCPU(painter, rect, sampleRange);
+}
+
+void SpectrogramPlot::paintMidCPU(QPainter &painter, QRect &rect, range_t<size_t> sampleRange)
+{
     size_t sampleOffset = sampleRange.minimum % (getStride() * linesPerTile());
     size_t tileID = sampleRange.minimum - sampleOffset;
     int xoffset = sampleOffset / getStride();
@@ -243,11 +302,197 @@ void SpectrogramPlot::paintMid(QPainter &painter, QRect &rect, range_t<size_t> s
 
     // Paint remaining tiles
     for (int x = linesPerTile() - xoffset; x < rect.right(); x += linesPerTile()) {
-        // TODO: don't draw past rect.right()
-        // TODO: handle partial final tile
         painter.drawPixmap(QRect(x, rect.y(), linesPerTile(), height()), *getPixmapTile(tileID), QRect(0, 0, linesPerTile(), height()));
         tileID += getStride() * linesPerTile();
     }
+}
+
+// ---------------------------------------------------------------------------
+// OpenGL accelerated rendering
+// ---------------------------------------------------------------------------
+
+bool SpectrogramPlot::initGL(QOpenGLFunctions *f)
+{
+    // Compile shader
+    glShader = new QOpenGLShaderProgram();
+    if (!glShader->addShaderFromSourceCode(QOpenGLShader::Vertex, glVertSrc) ||
+        !glShader->addShaderFromSourceCode(QOpenGLShader::Fragment, glFragSrc) ||
+        !glShader->link()) {
+        fprintf(stderr, "SpectrogramPlot: GL shader failed: %s\n",
+                glShader->log().toUtf8().constData());
+        fflush(stderr);
+        delete glShader;
+        glShader = nullptr;
+        return false;
+    }
+
+    // Unit quad VBO (triangle strip: TL, TR, BL, BR)
+    float quadVerts[] = {
+        0.0f, 0.0f,
+        1.0f, 0.0f,
+        0.0f, 1.0f,
+        1.0f, 1.0f,
+    };
+    f->glGenBuffers(1, &glQuadVBO);
+    f->glBindBuffer(GL_ARRAY_BUFFER, glQuadVBO);
+    f->glBufferData(GL_ARRAY_BUFFER, sizeof(quadVerts), quadVerts, GL_STATIC_DRAW);
+    f->glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    // Colormap texture (256x1 RGBA)
+    uint8_t cmapData[256 * 4];
+    for (int i = 0; i < 256; i++) {
+        QRgb c = colormap[i];
+        cmapData[i * 4 + 0] = qRed(c);
+        cmapData[i * 4 + 1] = qGreen(c);
+        cmapData[i * 4 + 2] = qBlue(c);
+        cmapData[i * 4 + 3] = 255;
+    }
+    f->glGenTextures(1, &glColormapTex);
+    f->glBindTexture(GL_TEXTURE_2D, glColormapTex);
+    f->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 1, 0,
+                    GL_RGBA, GL_UNSIGNED_BYTE, cmapData);
+    f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    f->glBindTexture(GL_TEXTURE_2D, 0);
+
+    fprintf(stderr, "SpectrogramPlot: OpenGL colormap shader initialized\n");
+    fflush(stderr);
+    return true;
+}
+
+void SpectrogramPlot::clearGLTileCache(QOpenGLFunctions *f)
+{
+    for (auto &kv : glTileTextures)
+        f->glDeleteTextures(1, &kv.second);
+    glTileTextures.clear();
+}
+
+GLuint SpectrogramPlot::getOrCreateGLTile(QOpenGLFunctions *f, size_t tile)
+{
+    auto it = glTileTextures.find(tile);
+    if (it != glTileTextures.end())
+        return it->second;
+
+    float *fftTile = getFFTTile(tile);
+
+    GLuint tex;
+    f->glGenTextures(1, &tex);
+    f->glBindTexture(GL_TEXTURE_2D, tex);
+    f->glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F,
+                    fftSize, linesPerTile(), 0,
+                    GL_RED, GL_FLOAT, fftTile);
+    f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    f->glBindTexture(GL_TEXTURE_2D, 0);
+
+    glTileTextures[tile] = tex;
+    return tex;
+}
+
+void SpectrogramPlot::paintMidGL(QPainter &painter, QRect &rect, range_t<size_t> sampleRange)
+{
+    auto *ctx = QOpenGLContext::currentContext();
+    auto *f = ctx->functions();
+
+    // Lazy GL init
+    if (!glInitialized) {
+        glInitialized = initGL(f);
+        glFailed = !glInitialized;
+        if (glFailed) {
+            paintMidCPU(painter, rect, sampleRange);
+            return;
+        }
+    }
+
+    // Invalidate tile cache if FFT parameters changed
+    if (fftSize != glCacheFftSize || zoomLevel != glCacheZoomLevel ||
+        nfftSkip != glCacheNfftSkip || glTileCacheDirty) {
+        clearGLTileCache(f);
+        glCacheFftSize = fftSize;
+        glCacheZoomLevel = zoomLevel;
+        glCacheNfftSkip = nfftSkip;
+        glTileCacheDirty = false;
+    }
+
+    painter.beginNativePainting();
+
+    // Viewport dimensions for NDC transform
+    GLint vp[4];
+    f->glGetIntegerv(GL_VIEWPORT, vp);
+    float vpW = vp[2], vpH = vp[3];
+
+    // Bind shader and set shared uniforms
+    glShader->bind();
+    glShader->setUniformValue("uViewport", QVector2D(vpW, vpH));
+    glShader->setUniformValue("uPowerMax", powerMax);
+    glShader->setUniformValue("uPowerRange",
+        -1.0f / std::abs(static_cast<int>(powerMin - powerMax)));
+
+    // Colormap on texture unit 1
+    f->glActiveTexture(GL_TEXTURE1);
+    f->glBindTexture(GL_TEXTURE_2D, glColormapTex);
+    glShader->setUniformValue("uColormap", 1);
+
+    // FFT data will go on texture unit 0
+    f->glActiveTexture(GL_TEXTURE0);
+    glShader->setUniformValue("uFFTData", 0);
+
+    // Bind quad geometry
+    f->glBindBuffer(GL_ARRAY_BUFFER, glQuadVBO);
+    int aPosLoc = glShader->attributeLocation("aPos");
+    f->glEnableVertexAttribArray(aPosLoc);
+    f->glVertexAttribPointer(aPosLoc, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+    // Frequency range: for real signals show only positive half
+    float freqTexMax = inputSource->realSignal() ? 0.5f : 0.0f;
+
+    // Tile iteration (same logic as the CPU path)
+    size_t sampleOffset = sampleRange.minimum % (getStride() * linesPerTile());
+    size_t tileID = sampleRange.minimum - sampleOffset;
+    int xoffset = sampleOffset / getStride();
+
+    auto drawTile = [&](int screenX, int screenW, float tTimeMin, float tTimeMax) {
+        GLuint tex = getOrCreateGLTile(f, tileID);
+        f->glBindTexture(GL_TEXTURE_2D, tex);
+
+        glShader->setUniformValue("uDstPos",  QVector2D(screenX, rect.y()));
+        glShader->setUniformValue("uDstSize", QVector2D(screenW, height()));
+        // X axis of quad = time  → texture t (height axis)
+        // Y axis of quad = freq  → texture s (width axis), high freq at top
+        glShader->setUniformValue("uTexMin", QVector2D(tTimeMin, 1.0f));
+        glShader->setUniformValue("uTexMax", QVector2D(tTimeMax, freqTexMax));
+
+        f->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    };
+
+    // First (possibly partial) tile
+    {
+        int w = linesPerTile() - xoffset;
+        float tMin = static_cast<float>(xoffset) / linesPerTile();
+        drawTile(rect.left(), w, tMin, 1.0f);
+        tileID += getStride() * linesPerTile();
+    }
+
+    // Remaining full tiles
+    for (int x = linesPerTile() - xoffset; x < rect.right(); x += linesPerTile()) {
+        drawTile(x, linesPerTile(), 0.0f, 1.0f);
+        tileID += getStride() * linesPerTile();
+    }
+
+    // Restore GL state
+    f->glDisableVertexAttribArray(aPosLoc);
+    f->glBindBuffer(GL_ARRAY_BUFFER, 0);
+    f->glActiveTexture(GL_TEXTURE1);
+    f->glBindTexture(GL_TEXTURE_2D, 0);
+    f->glActiveTexture(GL_TEXTURE0);
+    f->glBindTexture(GL_TEXTURE_2D, 0);
+    glShader->release();
+
+    painter.endNativePainting();
 }
 
 QPixmap* SpectrogramPlot::getPixmapTile(size_t tile)

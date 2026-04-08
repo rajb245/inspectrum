@@ -28,6 +28,7 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QMenu>
+#include <QOpenGLWidget>
 #include <QPainter>
 #include <QProgressDialog>
 #include <QRadioButton>
@@ -43,6 +44,7 @@ PlotView::PlotView(InputSource *input) : cursors(this), viewRange({0, 0})
     setDragMode(QGraphicsView::ScrollHandDrag);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     setMouseTracking(true);
+    setViewport(new QOpenGLWidget());
     enableCursors(false);
     connect(&cursors, &Cursors::cursorsMoved, this, &PlotView::cursorsMoved);
 
