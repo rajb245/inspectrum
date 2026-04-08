@@ -34,7 +34,7 @@ jobs:
     - name: Set variables Qt6
       run: |
         echo "QTPKG_MAC=qt@6" >> $GITHUB_ENV
-        echo "QTPKG_UBUNTU=qt6-base-dev" >> $GITHUB_ENV
+        echo "QTPKG_UBUNTU=qt6-base-dev qt6-base-dev-tools libqt6opengl6-dev libqt6openglwidgets6" >> $GITHUB_ENV
       if: matrix.qt == 'qt6'
 
     - name: Install dependencies (macOS)
@@ -49,6 +49,10 @@ jobs:
 
     - name: Create Build Environment
       run: cmake -E make_directory ${{runner.workspace}}/build
+
+    - name: Set Qt6 prefix (macOS)
+      run: echo "CMAKE_PREFIX_PATH=/opt/homebrew/opt/qt@6" >> $GITHUB_ENV
+      if: matrix.qt == 'qt6' && matrix.os == 'macos-latest'
 
     - name: Configure CMake
       shell: bash

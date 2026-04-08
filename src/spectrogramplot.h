@@ -27,6 +27,7 @@
 #include <QString>
 #include <QWidget>
 #include <QtConcurrent>
+#include <QtGlobal>
 #include "fft.h"
 #include "inputsource.h"
 #include "plot.h"

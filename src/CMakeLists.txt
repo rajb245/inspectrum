@@ -52,11 +52,15 @@ list(APPEND inspectrum_sources
     util.cpp
 )
 
-find_package(Qt6 COMPONENTS Core Concurrent Widgets OpenGL)
+find_package(Qt6 COMPONENTS Core Concurrent Widgets OpenGL OpenGLWidgets)
 if (NOT Qt6_FOUND)
     find_package(Qt5 REQUIRED COMPONENTS Core Concurrent Widgets OpenGL)
 endif()
 find_package(OpenGL REQUIRED)
+
+if (Qt6_FOUND AND Qt6OpenGLWidgets_FOUND)
+    add_definitions(-DHAVE_QT6_OPENGLWIDGETS)
+endif()
 find_package(FFTW REQUIRED)
 find_package(Liquid REQUIRED)
 
@@ -68,8 +72,12 @@ include_directories(
 add_executable(inspectrum ${EXE_ARGS} ${inspectrum_sources})
 
 if (Qt6_FOUND)
+    set(_qt6_gl_libs Qt6::OpenGL)
+    if (Qt6OpenGLWidgets_FOUND)
+        list(APPEND _qt6_gl_libs Qt6::OpenGLWidgets)
+    endif()
     target_link_libraries(inspectrum
-        Qt6::Core Qt6::Widgets Qt6::Concurrent Qt6::OpenGL
+        Qt6::Core Qt6::Widgets Qt6::Concurrent ${_qt6_gl_libs}
         OpenGL::GL
         ${FFTW_LIBRARIES}
         ${LIQUID_LIBRARIES}
@@ -87,14 +95,13 @@ set(INSTALL_DEFAULT_BINDIR "bin" CACHE STRING "Appended to CMAKE_INSTALL_PREFIX"
 
 install(TARGETS inspectrum RUNTIME DESTINATION ${INSTALL_DEFAULT_BINDIR})
 
-# Standalone benchmark for profiling the DSP hot-paths (no Qt GUI needed)
-add_executable(inspectrum_bench benchmark.cpp fft.cpp)
-target_include_directories(inspectrum_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# Standalone benchmark with built-in sampling profiler (Windows/MSVC only)
 if (MSVC)
+    add_executable(inspectrum_bench benchmark.cpp fft.cpp)
+    target_include_directories(inspectrum_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${FFTW_INCLUDES})
     target_compile_definitions(inspectrum_bench PRIVATE _USE_MATH_DEFINES)
+    target_link_libraries(inspectrum_bench ${FFTW_LIBRARIES})
 endif()
-target_include_directories(inspectrum_bench PRIVATE ${FFTW_INCLUDES})
-target_link_libraries(inspectrum_bench ${FFTW_LIBRARIES})
 
 # On Windows, collect all required DLLs alongside the executable so the
 # install prefix is a self-contained, runnable directory.

@@ -28,7 +28,11 @@
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QMenu>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#include <QtOpenGLWidgets/QOpenGLWidget>
+#else
 #include <QOpenGLWidget>
+#endif
 #include <QPainter>
 #include <QProgressDialog>
 #include <QRadioButton>
