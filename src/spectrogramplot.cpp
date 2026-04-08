@@ -446,15 +446,17 @@ void SpectrogramPlot::launchAsyncTile(size_t tileID)
     }
 
     // Capture shared resources by value so they stay alive.
-    auto src     = inputSource;
-    auto fftObj  = fft;
-    auto win     = window;
-    int  fftSz   = fftSize;
-    int  lpt     = linesPerTile();
-    int  str     = getStride();
-    int  gen     = asyncGeneration;
+    auto src      = inputSource;
+    auto singlePlan = fft;
+    auto batch    = batchFFT;
+    auto win      = window;
+    bool doBatch  = useBatchFFT;
+    int  fftSz    = fftSize;
+    int  lpt      = linesPerTile();
+    int  str      = getStride();
+    int  gen      = asyncGeneration;
 
-    QtConcurrent::run([this, src, fftObj, win, fftSz, lpt, str, tileID, gen]() {
+    QtConcurrent::run([this, src, singlePlan, batch, win, doBatch, fftSz, lpt, str, tileID, gen]() {
         // Bail out early if params changed while queued.
         {
             QMutexLocker lock(&asyncMutex);
@@ -464,45 +466,54 @@ void SpectrogramPlot::launchAsyncTile(size_t tileID)
             }
         }
 
-        // Per-thread FFTW buffers (same alignment as plan buffers).
-        auto *fftwIn  = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * fftSz);
-        auto *fftwOut = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * fftSz);
+        // Per-thread batch buffers (same alignment as the plan arrays).
+        int total = fftSz * lpt;
+        auto *fftwIn  = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * total);
+        auto *fftwOut = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * total);
 
-        auto *result = new std::array<float, tileSize>;
-        float *ptr = result->data();
-        size_t sample = tileID;
+        // Phase 1: collect windowed samples into contiguous batch input.
         const float *winData = win->data();
-        fftwf_plan plan = fftObj->getPlan();
-
+        size_t sample = tileID;
         for (int line = 0; line < lpt; line++) {
             const auto first_sample = std::max(
                 static_cast<ssize_t>(sample) - fftSz / 2,
                 static_cast<ssize_t>(0));
             auto buffer = src->getSamples(first_sample, fftSz);
-
+            fftwf_complex *lineIn = &fftwIn[line * fftSz];
             if (buffer) {
-                for (int i = 0; i < fftSz; i++)
-                    buffer[i] *= winData[i];
-
-                // Thread-safe: shared plan, private buffers.
-                memcpy(fftwIn, buffer.get(), fftSz * sizeof(fftwf_complex));
-                fftwf_execute_dft(plan, fftwIn, fftwOut);
-
-                const float inv = 1.0f / fftSz;
-                const float logMul = 10.0f / fast_log2(10.0f);
+                auto *s = reinterpret_cast<const float*>(buffer.get());
                 for (int i = 0; i < fftSz; i++) {
-                    int k = i ^ (fftSz >> 1);
-                    float re = reinterpret_cast<float*>(fftwOut)[2 * k] * inv;
-                    float im = reinterpret_cast<float*>(fftwOut)[2 * k + 1] * inv;
-                    ptr[i] = fast_log2(re * re + im * im) * logMul;
+                    lineIn[i][0] = s[2 * i]     * winData[i];
+                    lineIn[i][1] = s[2 * i + 1] * winData[i];
                 }
             } else {
-                auto neg_inf = -std::numeric_limits<float>::infinity();
-                for (int i = 0; i < fftSz; i++)
-                    ptr[i] = neg_inf;
+                memset(lineIn, 0, fftSz * sizeof(fftwf_complex));
             }
-            ptr += fftSz;
             sample += str;
+        }
+
+        // Phase 2: FFT — use whichever approach the auto-tune picked.
+        if (doBatch) {
+            fftwf_execute_dft(batch->plan, fftwIn, fftwOut);
+        } else {
+            for (int line = 0; line < lpt; line++)
+                fftwf_execute_dft(singlePlan->getPlan(),
+                                  &fftwIn[line * fftSz], &fftwOut[line * fftSz]);
+        }
+
+        // Phase 3: log-power conversion.
+        auto *result = new std::array<float, tileSize>;
+        float *ptr = result->data();
+        const float inv = 1.0f / fftSz;
+        const float logMul = 10.0f / fast_log2(10.0f);
+        for (int line = 0; line < lpt; line++) {
+            fftwf_complex *lineOut = &fftwOut[line * fftSz];
+            for (int i = 0; i < fftSz; i++) {
+                int k = i ^ (fftSz >> 1);
+                float re = lineOut[k][0] * inv;
+                float im = lineOut[k][1] * inv;
+                ptr[line * fftSz + i] = fast_log2(re * re + im * im) * logMul;
+            }
         }
 
         fftwf_free(fftwIn);
@@ -672,14 +683,56 @@ float* SpectrogramPlot::getFFTTile(size_t tile)
     if (obj != nullptr)
         return obj->data();
 
-    std::array<float, tileSize>* destStorage = new std::array<float, tileSize>;
-    float *ptr = destStorage->data();
+    int lpt = linesPerTile();
+    const float *winData = window->data();
+    fftwf_complex *bIn = batchFFT->bufIn;
+    fftwf_complex *bOut = batchFFT->bufOut;
+
+    // Phase 1: collect windowed samples into contiguous buffer.
+    // Fuses the window multiply with the copy (one pass, not two).
     size_t sample = tile;
-    while ((ptr - destStorage->data()) < tileSize) {
-        getLine(ptr, sample);
+    for (int line = 0; line < lpt; line++) {
+        const auto first_sample = std::max(
+            static_cast<ssize_t>(sample) - fftSize / 2,
+            static_cast<ssize_t>(0));
+        auto buffer = inputSource->getSamples(first_sample, fftSize);
+        fftwf_complex *lineIn = &bIn[line * fftSize];
+        if (buffer) {
+            auto *src = reinterpret_cast<const float*>(buffer.get());
+            for (int i = 0; i < fftSize; i++) {
+                lineIn[i][0] = src[2 * i]     * winData[i];
+                lineIn[i][1] = src[2 * i + 1] * winData[i];
+            }
+        } else {
+            memset(lineIn, 0, fftSize * sizeof(fftwf_complex));
+        }
         sample += getStride();
-        ptr += fftSize;
     }
+
+    // Phase 2: FFT — dispatch to whichever approach the auto-tune picked.
+    if (useBatchFFT) {
+        fftwf_execute(batchFFT->plan);
+    } else {
+        for (int line = 0; line < lpt; line++)
+            fftwf_execute_dft(fft->getPlan(),
+                              &bIn[line * fftSize], &bOut[line * fftSize]);
+    }
+
+    // Phase 3: log-power conversion.
+    auto *destStorage = new std::array<float, tileSize>;
+    float *dest = destStorage->data();
+    const float inv = 1.0f / fftSize;
+    const float logMul = 10.0f / fast_log2(10.0f);
+    for (int line = 0; line < lpt; line++) {
+        fftwf_complex *lineOut = &bOut[line * fftSize];
+        for (int i = 0; i < fftSize; i++) {
+            int k = i ^ (fftSize >> 1);
+            float re = lineOut[k][0] * inv;
+            float im = lineOut[k][1] * inv;
+            dest[line * fftSize + i] = fast_log2(re * re + im * im) * logMul;
+        }
+    }
+
     fftCache.insert(TileCacheKey(fftSize, zoomLevel, nfftSkip, tile), destStorage);
     return destStorage->data();
 }
@@ -774,10 +827,53 @@ void SpectrogramPlot::setFFTSize(int size)
     float sizeScale = float(size) / float(fftSize);
     fftSize = size;
     fft = std::make_shared<FFT>(fftSize);
+    batchFFT = std::make_shared<BatchFFTPlan>(fftSize, tileSize / fftSize);
 
     window = std::make_shared<std::vector<float>>(fftSize);
     for (int i = 0; i < fftSize; i++) {
         (*window)[i] = 0.5f * (1.0f - cos(Tau * i / (fftSize - 1)));
+    }
+
+    // Auto-tune: time a few iterations of per-line vs batched FFT and pick
+    // the winner.  Runs on the plan's own scratch buffers (already allocated
+    // by FFTW_MEASURE), so the marginal cost is a handful of FFT executions.
+    {
+        const int tuneIters = 4;
+        int lpt = tileSize / fftSize;
+
+        // Fill scratch with plausible data so FFTW doesn't short-circuit zeros.
+        for (int i = 0; i < tileSize; i++) {
+            batchFFT->bufIn[i][0] = 1.0f;
+            batchFFT->bufIn[i][1] = 0.0f;
+        }
+
+        // Time per-line: N × single-FFT execute
+        QElapsedTimer timer;
+        timer.start();
+        for (int iter = 0; iter < tuneIters; iter++) {
+            for (int line = 0; line < lpt; line++) {
+                fftwf_complex *lineIn  = &batchFFT->bufIn[line * fftSize];
+                fftwf_complex *lineOut = &batchFFT->bufOut[line * fftSize];
+                fftwf_execute_dft(fft->getPlan(), lineIn, lineOut);
+            }
+        }
+        qint64 perLineNs = timer.nsecsElapsed();
+
+        // Time batched: single call for all lines
+        timer.restart();
+        for (int iter = 0; iter < tuneIters; iter++) {
+            fftwf_execute(batchFFT->plan);
+        }
+        qint64 batchNs = timer.nsecsElapsed();
+
+        useBatchFFT = (batchNs <= perLineNs);
+        fprintf(stderr, "SpectrogramPlot: fftSize=%d linesPerTile=%d  "
+                "per-line=%lldus  batch=%lldus -> %s\n",
+                fftSize, lpt,
+                (long long)(perLineNs / 1000 / tuneIters),
+                (long long)(batchNs / 1000 / tuneIters),
+                useBatchFFT ? "BATCH" : "PER-LINE");
+        fflush(stderr);
     }
 
     if (inputSource->realSignal()) {

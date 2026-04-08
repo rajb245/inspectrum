@@ -343,7 +343,7 @@ static void colormapConvert(uint32_t *pixels, const float *fftTile,
     }
 }
 
-// Full tile: N x getLine  (mirrors SpectrogramPlot::getFFTTile)
+// Full tile: N x getLine  (old per-line approach)
 static void getFFTTile(float *dest, const std::complex<float> *samples,
                        int sampleCount, const float *window, FFT &fft,
                        int fftSize, int stride, int linesPerTile)
@@ -357,6 +357,43 @@ static void getFFTTile(float *dest, const std::complex<float> *samples,
         getLine(ptr, samples + srcOffset, window, fft, fftSize);
         ptr += fftSize;
         offset += stride;
+    }
+}
+
+// Full tile via batched FFT (mirrors new SpectrogramPlot::getFFTTile)
+static void getFFTTileBatched(float *dest, const std::complex<float> *samples,
+                              int sampleCount, const float *window,
+                              fftwf_plan batchPlan,
+                              fftwf_complex *bIn, fftwf_complex *bOut,
+                              int fftSize, int stride, int linesPerTile)
+{
+    // Phase 1: window + copy into contiguous batch input
+    for (int line = 0; line < linesPerTile; line++) {
+        int srcOffset = line * stride;
+        if (srcOffset + fftSize > sampleCount)
+            srcOffset = sampleCount - fftSize;
+        const float *src = reinterpret_cast<const float*>(samples + srcOffset);
+        fftwf_complex *lineIn = &bIn[line * fftSize];
+        for (int i = 0; i < fftSize; i++) {
+            lineIn[i][0] = src[2 * i]     * window[i];
+            lineIn[i][1] = src[2 * i + 1] * window[i];
+        }
+    }
+
+    // Phase 2: single FFTW call for all lines
+    fftwf_execute_dft(batchPlan, bIn, bOut);
+
+    // Phase 3: log-power
+    const float inv = 1.0f / fftSize;
+    const float logMul = 10.0f / fast_log2(10.0f);
+    for (int line = 0; line < linesPerTile; line++) {
+        fftwf_complex *lineOut = &bOut[line * fftSize];
+        for (int i = 0; i < fftSize; i++) {
+            int k = i ^ (fftSize >> 1);
+            float re = lineOut[k][0] * inv;
+            float im = lineOut[k][1] * inv;
+            dest[line * fftSize + i] = fast_log2(re * re + im * im) * logMul;
+        }
     }
 }
 
@@ -473,19 +510,53 @@ int main(int argc, char *argv[])
 
     std::printf("\n--- Full-pipeline benchmarks ---\n");
 
-    // 4. Full FFT tile
-    bench("getFFTTile (all lines)", std::max(1, iterations / 10), [&]() {
+    // 4a. Full FFT tile (per-line, old approach)
+    bench("getFFTTile per-line", std::max(1, iterations / 10), [&]() {
         getFFTTile(fftOutput.get(), samples.get(), totalSamples,
                    window.get(), fft, fftSize, stride, linesPerTile);
     });
 
-    // 5. Full tile + colormap
-    bench("full tile + colormap", std::max(1, iterations / 10), [&]() {
-        getFFTTile(fftOutput.get(), samples.get(), totalSamples,
-                   window.get(), fft, fftSize, stride, linesPerTile);
-        colormapConvert(pixels.get(), fftOutput.get(), colormap,
-                        fftSize, linesPerTile, powerMax, powerMin);
-    });
+    // 4b. Full FFT tile (batched, new approach)
+    {
+        int n[] = {fftSize};
+        auto *bIn  = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * tileSize);
+        auto *bOut = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * tileSize);
+        fftwf_plan batchPlan = fftwf_plan_many_dft(1, n, linesPerTile,
+            bIn, NULL, 1, fftSize,  bOut, NULL, 1, fftSize,
+            FFTW_FORWARD, FFTW_MEASURE);
+
+        bench("getFFTTile BATCHED", std::max(1, iterations / 10), [&]() {
+            getFFTTileBatched(fftOutput.get(), samples.get(), totalSamples,
+                              window.get(), batchPlan, bIn, bOut,
+                              fftSize, stride, linesPerTile);
+        });
+
+        fftwf_destroy_plan(batchPlan);
+        fftwf_free(bIn);
+        fftwf_free(bOut);
+    }
+
+    // 5. Full tile (batched) + colormap
+    {
+        int n[] = {fftSize};
+        auto *bIn  = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * tileSize);
+        auto *bOut = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * tileSize);
+        fftwf_plan batchPlan = fftwf_plan_many_dft(1, n, linesPerTile,
+            bIn, NULL, 1, fftSize,  bOut, NULL, 1, fftSize,
+            FFTW_FORWARD, FFTW_MEASURE);
+
+        bench("full tile batched+colormap", std::max(1, iterations / 10), [&]() {
+            getFFTTileBatched(fftOutput.get(), samples.get(), totalSamples,
+                              window.get(), batchPlan, bIn, bOut,
+                              fftSize, stride, linesPerTile);
+            colormapConvert(pixels.get(), fftOutput.get(), colormap,
+                            fftSize, linesPerTile, powerMax, powerMin);
+        });
+
+        fftwf_destroy_plan(batchPlan);
+        fftwf_free(bIn);
+        fftwf_free(bOut);
+    }
 
     // -----------------------------------------------------------------------
     std::printf("\n--- FFT size sweep ---\n");

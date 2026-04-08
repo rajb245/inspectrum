@@ -265,7 +265,7 @@ QJsonObject InputSource::readMetaData(const QString &filename)
 
 
     auto datatype = global["core:datatype"].toString();
-    if (datatype.compare("cf32_le") == 0) {
+    if (datatype.compare("cf32_le") == 0 || datatype.compare("fc32_le") == 0) {
         sampleAdapter = std::make_unique<ComplexF32SampleAdapter>();
     } else if (datatype.compare("ci32_le") == 0) {
         sampleAdapter = std::make_unique<ComplexS32SampleAdapter>();
@@ -288,7 +288,7 @@ QJsonObject InputSource::readMetaData(const QString &filename)
         sampleAdapter = std::make_unique<RealU8SampleAdapter>();
         _realSignal = true;
     } else {
-        throw std::runtime_error("SigMF meta data specifies unsupported datatype");
+        throw std::runtime_error("SigMF meta data specifies unsupported datatype: " + datatype.toStdString());
     }
 
     if (global.contains("core:sample_rate") && global["core:sample_rate"].isDouble()) {
@@ -348,7 +348,7 @@ QJsonObject InputSource::readMetaData(const QString &filename)
 
                 auto sigmf_color = sigmf_annotation["presentation:color"].toString();
                 // SigMF uses the format "#RRGGBBAA" for alpha-channel colors, QT uses "#AARRGGBB"
-                if ((sigmf_color.at(0) == '#') && (sigmf_color.length()) == 9) {
+                if (sigmf_color.length() == 9 && sigmf_color.at(0) == '#') {
                     sigmf_color = "#" + sigmf_color.mid(7,2) + sigmf_color.mid(1,6);
                 }
                 auto boxColor = QString::fromStdString("white");

@@ -42,6 +42,37 @@
 
 class AnnotationLocation;
 
+// RAII wrapper for a batched FFTW plan (N FFTs in a single call).
+// The plan is read-only after construction, so multiple threads can
+// execute it concurrently via fftwf_execute_dft with private buffers.
+struct BatchFFTPlan {
+    fftwf_plan plan = nullptr;
+    fftwf_complex *bufIn = nullptr;   // also used as sync-path scratch
+    fftwf_complex *bufOut = nullptr;
+    int fftSize;
+    int batchCount;
+
+    BatchFFTPlan(int fftSz, int batch)
+        : fftSize(fftSz), batchCount(batch)
+    {
+        int total = fftSz * batch;
+        bufIn  = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * total);
+        bufOut = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * total);
+        int n[] = {fftSz};
+        plan = fftwf_plan_many_dft(1, n, batch,
+                   bufIn,  NULL, 1, fftSz,
+                   bufOut, NULL, 1, fftSz,
+                   FFTW_FORWARD, FFTW_MEASURE);
+    }
+    ~BatchFFTPlan() {
+        if (plan)   fftwf_destroy_plan(plan);
+        if (bufIn)  fftwf_free(bufIn);
+        if (bufOut) fftwf_free(bufOut);
+    }
+    BatchFFTPlan(const BatchFFTPlan&) = delete;
+    BatchFFTPlan& operator=(const BatchFFTPlan&) = delete;
+};
+
 
 class TileCacheKey
 {
@@ -104,6 +135,8 @@ private:
     std::shared_ptr<SampleSource<std::complex<float>>> inputSource;
     std::vector<AnnotationLocation> visibleAnnotationLocations;
     std::shared_ptr<FFT> fft;
+    std::shared_ptr<BatchFFTPlan> batchFFT;
+    bool useBatchFFT = false;  // set by auto-tune in setFFTSize
     std::shared_ptr<std::vector<float>> window;
     QCache<TileCacheKey, QPixmap> pixmapCache;
     QCache<TileCacheKey, std::array<float, tileSize>> fftCache;
