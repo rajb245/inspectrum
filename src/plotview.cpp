@@ -231,6 +231,20 @@ bool PlotView::viewportEvent(QEvent *event) {
     // Handle wheel events for zooming (before the parent's handler to stop normal scrolling)
     if (event->type() == QEvent::Wheel) {
         QWheelEvent *wheelEvent = (QWheelEvent*)event;
+        // Ctrl+Shift+Scroll: change FFT size (must be checked before Ctrl-only)
+        if ((wheelEvent->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)) == (Qt::ControlModifier | Qt::ShiftModifier)) {
+            int delta = wheelEvent->angleDelta().y();
+            scrollFftStepsAccumulated += delta;
+            if (scrollFftStepsAccumulated >= 120) {
+                scrollFftStepsAccumulated -= 120;
+                emit fftSizeUp();
+            } else if (scrollFftStepsAccumulated <= -120) {
+                scrollFftStepsAccumulated += 120;
+                emit fftSizeDown();
+            }
+            return true;
+        }
+        // Ctrl+Scroll: zoom in time
         if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
             bool canZoomIn = zoomLevel < fftSize;
             bool canZoomOut = zoomLevel > 1;

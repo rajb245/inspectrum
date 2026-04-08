@@ -61,6 +61,8 @@ MainWindow::MainWindow()
     connect(plots, &PlotView::timeSelectionChanged, dock, &SpectrogramControls::timeSelectionChanged);
     connect(plots, &PlotView::zoomIn, dock, &SpectrogramControls::zoomIn);
     connect(plots, &PlotView::zoomOut, dock, &SpectrogramControls::zoomOut);
+    connect(plots, &PlotView::fftSizeUp, dock, &SpectrogramControls::fftSizeUp);
+    connect(plots, &PlotView::fftSizeDown, dock, &SpectrogramControls::fftSizeDown);
 
     // Set defaults after making connections so everything is in sync
     dock->setDefaults();

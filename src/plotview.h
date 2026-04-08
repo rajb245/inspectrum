@@ -41,6 +41,8 @@ signals:
     void timeSelectionChanged(float time);
     void zoomIn();
     void zoomOut();
+    void fftSizeUp();
+    void fftSizeDown();
 
 public slots:
     void cursorsMoved();
@@ -86,6 +88,7 @@ private:
     double sampleRate = 0.0;
     bool timeScaleEnabled;
     int scrollZoomStepsAccumulated = 0;
+    int scrollFftStepsAccumulated = 0;
     bool annotationCommentsEnabled;
 
     void addPlot(Plot *plot);

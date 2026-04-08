@@ -44,6 +44,8 @@ public slots:
     void timeSelectionChanged(float time);
     void zoomIn();
     void zoomOut();
+    void fftSizeUp();
+    void fftSizeDown();
     void enableAnnotations(bool enabled);
 
 private slots:

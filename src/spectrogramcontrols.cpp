@@ -250,6 +250,16 @@ void SpectrogramControls::zoomOut()
     zoomLevelSlider->setValue(zoomLevelSlider->value() - 1);
 }
 
+void SpectrogramControls::fftSizeUp()
+{
+    fftSizeSlider->setValue(fftSizeSlider->value() + 1);
+}
+
+void SpectrogramControls::fftSizeDown()
+{
+    fftSizeSlider->setValue(fftSizeSlider->value() - 1);
+}
+
 void SpectrogramControls::enableAnnotations(bool enabled) {
     // disable annotation comments checkbox when annotations are disabled
     commentsCheckBox->setEnabled(enabled);
