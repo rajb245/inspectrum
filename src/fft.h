@@ -30,6 +30,9 @@ public:
     int getSize() {
         return fftSize;
     }
+    // Expose plan for thread-safe execution via fftwf_execute_dft
+    // with caller-provided buffers (plan itself is read-only).
+    fftwf_plan getPlan() const { return fftwPlan; }
 
 private:
     int fftSize;

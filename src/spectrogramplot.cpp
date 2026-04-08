@@ -140,6 +140,13 @@ void SpectrogramPlot::invalidateEvent()
     pixmapCache.clear();
     fftCache.clear();
     glTileCacheDirty = true;
+    {
+        QMutexLocker lock(&asyncMutex);
+        asyncGeneration++;
+        asyncPending.clear();
+        for (auto &kv : asyncCompleted) delete kv.second;
+        asyncCompleted.clear();
+    }
     emit repaint();
 }
 
@@ -400,28 +407,118 @@ void SpectrogramPlot::clearGLTileCache(QOpenGLFunctions *f)
     glTileTextures.clear();
 }
 
-GLuint SpectrogramPlot::getOrCreateGLTile(QOpenGLFunctions *f, size_t tile)
+GLuint SpectrogramPlot::uploadFFTToGL(QOpenGLFunctions *f, const float *data)
 {
-    auto it = glTileTextures.find(tile);
-    if (it != glTileTextures.end())
-        return it->second;
-
-    float *fftTile = getFFTTile(tile);
-
     GLuint tex;
     f->glGenTextures(1, &tex);
     f->glBindTexture(GL_TEXTURE_2D, tex);
     f->glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F,
                     fftSize, linesPerTile(), 0,
-                    GL_RED, GL_FLOAT, fftTile);
+                    GL_RED, GL_FLOAT, data);
     f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     f->glBindTexture(GL_TEXTURE_2D, 0);
-
-    glTileTextures[tile] = tex;
     return tex;
+}
+
+// Move completed async results into fftCache (main thread only).
+void SpectrogramPlot::consumeAsyncTiles()
+{
+    std::map<size_t, std::array<float, tileSize>*> ready;
+    {
+        QMutexLocker lock(&asyncMutex);
+        ready.swap(asyncCompleted);
+    }
+    for (auto &kv : ready)
+        fftCache.insert(TileCacheKey(fftSize, zoomLevel, nfftSkip, kv.first), kv.second);
+}
+
+// Launch a background thread to compute one FFT tile.
+void SpectrogramPlot::launchAsyncTile(size_t tileID)
+{
+    {
+        QMutexLocker lock(&asyncMutex);
+        if (asyncPending.count(tileID))
+            return;
+        asyncPending.insert(tileID);
+    }
+
+    // Capture shared resources by value so they stay alive.
+    auto src     = inputSource;
+    auto fftObj  = fft;
+    auto win     = window;
+    int  fftSz   = fftSize;
+    int  lpt     = linesPerTile();
+    int  str     = getStride();
+    int  gen     = asyncGeneration;
+
+    QtConcurrent::run([this, src, fftObj, win, fftSz, lpt, str, tileID, gen]() {
+        // Bail out early if params changed while queued.
+        {
+            QMutexLocker lock(&asyncMutex);
+            if (gen != asyncGeneration) {
+                asyncPending.erase(tileID);
+                return;
+            }
+        }
+
+        // Per-thread FFTW buffers (same alignment as plan buffers).
+        auto *fftwIn  = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * fftSz);
+        auto *fftwOut = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * fftSz);
+
+        auto *result = new std::array<float, tileSize>;
+        float *ptr = result->data();
+        size_t sample = tileID;
+        const float *winData = win->data();
+        fftwf_plan plan = fftObj->getPlan();
+
+        for (int line = 0; line < lpt; line++) {
+            const auto first_sample = std::max(
+                static_cast<ssize_t>(sample) - fftSz / 2,
+                static_cast<ssize_t>(0));
+            auto buffer = src->getSamples(first_sample, fftSz);
+
+            if (buffer) {
+                for (int i = 0; i < fftSz; i++)
+                    buffer[i] *= winData[i];
+
+                // Thread-safe: shared plan, private buffers.
+                memcpy(fftwIn, buffer.get(), fftSz * sizeof(fftwf_complex));
+                fftwf_execute_dft(plan, fftwIn, fftwOut);
+
+                const float inv = 1.0f / fftSz;
+                const float logMul = 10.0f / fast_log2(10.0f);
+                for (int i = 0; i < fftSz; i++) {
+                    int k = i ^ (fftSz >> 1);
+                    float re = reinterpret_cast<float*>(fftwOut)[2 * k] * inv;
+                    float im = reinterpret_cast<float*>(fftwOut)[2 * k + 1] * inv;
+                    ptr[i] = fast_log2(re * re + im * im) * logMul;
+                }
+            } else {
+                auto neg_inf = -std::numeric_limits<float>::infinity();
+                for (int i = 0; i < fftSz; i++)
+                    ptr[i] = neg_inf;
+            }
+            ptr += fftSz;
+            sample += str;
+        }
+
+        fftwf_free(fftwIn);
+        fftwf_free(fftwOut);
+
+        {
+            QMutexLocker lock(&asyncMutex);
+            asyncPending.erase(tileID);
+            if (gen == asyncGeneration)
+                asyncCompleted[tileID] = result;
+            else
+                delete result;
+        }
+
+        emit repaint();
+    });
 }
 
 void SpectrogramPlot::paintMidGL(QPainter &painter, QRect &rect, range_t<size_t> sampleRange)
@@ -439,7 +536,7 @@ void SpectrogramPlot::paintMidGL(QPainter &painter, QRect &rect, range_t<size_t>
         }
     }
 
-    // Invalidate tile cache if FFT parameters changed
+    // Invalidate caches if FFT parameters changed
     if (fftSize != glCacheFftSize || zoomLevel != glCacheZoomLevel ||
         nfftSkip != glCacheNfftSkip || glTileCacheDirty) {
         clearGLTileCache(f);
@@ -447,57 +544,75 @@ void SpectrogramPlot::paintMidGL(QPainter &painter, QRect &rect, range_t<size_t>
         glCacheZoomLevel = zoomLevel;
         glCacheNfftSkip = nfftSkip;
         glTileCacheDirty = false;
+        QMutexLocker lock(&asyncMutex);
+        asyncGeneration++;
+        asyncPending.clear();
+        for (auto &kv : asyncCompleted) delete kv.second;
+        asyncCompleted.clear();
     }
+
+    // Move any completed async results into the fftCache.
+    consumeAsyncTiles();
 
     painter.beginNativePainting();
 
-    // Viewport dimensions for NDC transform
     GLint vp[4];
     f->glGetIntegerv(GL_VIEWPORT, vp);
     float vpW = vp[2], vpH = vp[3];
 
-    // Bind shader and set shared uniforms
     glShader->bind();
     glShader->setUniformValue("uViewport", QVector2D(vpW, vpH));
     glShader->setUniformValue("uPowerMax", powerMax);
     glShader->setUniformValue("uPowerRange",
         -1.0f / std::abs(static_cast<int>(powerMin - powerMax)));
 
-    // Colormap on texture unit 1
     f->glActiveTexture(GL_TEXTURE1);
     f->glBindTexture(GL_TEXTURE_2D, glColormapTex);
     glShader->setUniformValue("uColormap", 1);
 
-    // FFT data will go on texture unit 0
     f->glActiveTexture(GL_TEXTURE0);
     glShader->setUniformValue("uFFTData", 0);
 
-    // Bind quad geometry
     f->glBindBuffer(GL_ARRAY_BUFFER, glQuadVBO);
     int aPosLoc = glShader->attributeLocation("aPos");
     f->glEnableVertexAttribArray(aPosLoc);
     f->glVertexAttribPointer(aPosLoc, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
 
-    // Frequency range: for real signals show only positive half
     float freqTexMax = inputSource->realSignal() ? 0.5f : 0.0f;
 
-    // Tile iteration (same logic as the CPU path)
     size_t sampleOffset = sampleRange.minimum % (getStride() * linesPerTile());
     size_t tileID = sampleRange.minimum - sampleOffset;
     int xoffset = sampleOffset / getStride();
 
     auto drawTile = [&](int screenX, int screenW, float tTimeMin, float tTimeMax) {
-        GLuint tex = getOrCreateGLTile(f, tileID);
-        f->glBindTexture(GL_TEXTURE_2D, tex);
+        // 1. Already have a GL texture?
+        auto glIt = glTileTextures.find(tileID);
+        if (glIt != glTileTextures.end()) {
+            f->glBindTexture(GL_TEXTURE_2D, glIt->second);
+            glShader->setUniformValue("uDstPos",  QVector2D(screenX, rect.y()));
+            glShader->setUniformValue("uDstSize", QVector2D(screenW, height()));
+            glShader->setUniformValue("uTexMin", QVector2D(tTimeMin, 1.0f));
+            glShader->setUniformValue("uTexMax", QVector2D(tTimeMax, freqTexMax));
+            f->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            return;
+        }
 
-        glShader->setUniformValue("uDstPos",  QVector2D(screenX, rect.y()));
-        glShader->setUniformValue("uDstSize", QVector2D(screenW, height()));
-        // X axis of quad = time  → texture t (height axis)
-        // Y axis of quad = freq  → texture s (width axis), high freq at top
-        glShader->setUniformValue("uTexMin", QVector2D(tTimeMin, 1.0f));
-        glShader->setUniformValue("uTexMax", QVector2D(tTimeMax, freqTexMax));
+        // 2. FFT data in cache? Upload to GL.
+        auto *cached = fftCache.object(TileCacheKey(fftSize, zoomLevel, nfftSkip, tileID));
+        if (cached) {
+            GLuint tex = uploadFFTToGL(f, cached->data());
+            glTileTextures[tileID] = tex;
+            f->glBindTexture(GL_TEXTURE_2D, tex);
+            glShader->setUniformValue("uDstPos",  QVector2D(screenX, rect.y()));
+            glShader->setUniformValue("uDstSize", QVector2D(screenW, height()));
+            glShader->setUniformValue("uTexMin", QVector2D(tTimeMin, 1.0f));
+            glShader->setUniformValue("uTexMax", QVector2D(tTimeMax, freqTexMax));
+            f->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            return;
+        }
 
-        f->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        // 3. Not available yet — launch async computation, skip this tile.
+        launchAsyncTile(tileID);
     };
 
     // First (possibly partial) tile
@@ -508,7 +623,7 @@ void SpectrogramPlot::paintMidGL(QPainter &painter, QRect &rect, range_t<size_t>
         tileID += getStride() * linesPerTile();
     }
 
-    // Remaining full tiles
+    // Remaining tiles
     for (int x = linesPerTile() - xoffset; x < rect.right(); x += linesPerTile()) {
         drawTile(x, linesPerTile(), 0.0f, 1.0f);
         tileID += getStride() * linesPerTile();
@@ -587,7 +702,7 @@ void SpectrogramPlot::getLine(float *dest, size_t sample)
         }
 
         for (int i = 0; i < fftSize; i++) {
-            buffer[i] *= window[i];
+            buffer[i] *= (*window)[i];
         }
 
         fft->process(reinterpret_cast<fftwf_complex*>(buffer.get()), reinterpret_cast<fftwf_complex*>(buffer.get()));
@@ -658,11 +773,11 @@ void SpectrogramPlot::setFFTSize(int size)
 {
     float sizeScale = float(size) / float(fftSize);
     fftSize = size;
-    fft.reset(new FFT(fftSize));
+    fft = std::make_shared<FFT>(fftSize);
 
-    window.reset(new float[fftSize]);
+    window = std::make_shared<std::vector<float>>(fftSize);
     for (int i = 0; i < fftSize; i++) {
-        window[i] = 0.5f * (1.0f - cos(Tau * i / (fftSize - 1)));
+        (*window)[i] = 0.5f * (1.0f - cos(Tau * i / (fftSize - 1)));
     }
 
     if (inputSource->realSignal()) {

@@ -20,11 +20,13 @@
 #pragma once
 
 #include <QCache>
+#include <QMutex>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
 #include <QOpenGLShaderProgram>
 #include <QString>
 #include <QWidget>
+#include <QtConcurrent>
 #include "fft.h"
 #include "inputsource.h"
 #include "plot.h"
@@ -35,6 +37,7 @@
 #include <array>
 #include <map>
 #include <math.h>
+#include <set>
 #include <vector>
 
 class AnnotationLocation;
@@ -100,8 +103,8 @@ private:
 
     std::shared_ptr<SampleSource<std::complex<float>>> inputSource;
     std::vector<AnnotationLocation> visibleAnnotationLocations;
-    std::unique_ptr<FFT> fft;
-    std::unique_ptr<float[]> window;
+    std::shared_ptr<FFT> fft;
+    std::shared_ptr<std::vector<float>> window;
     QCache<TileCacheKey, QPixmap> pixmapCache;
     QCache<TileCacheKey, std::array<float, tileSize>> fftCache;
     uint colormap[256];
@@ -145,8 +148,17 @@ private:
     bool initGL(QOpenGLFunctions *f);
     void paintMidGL(QPainter &painter, QRect &rect, range_t<size_t> sampleRange);
     void paintMidCPU(QPainter &painter, QRect &rect, range_t<size_t> sampleRange);
-    GLuint getOrCreateGLTile(QOpenGLFunctions *f, size_t tile);
+    GLuint uploadFFTToGL(QOpenGLFunctions *f, const float *data);
     void clearGLTileCache(QOpenGLFunctions *f);
+
+    // Async tile computation (off the UI thread)
+    QMutex asyncMutex;
+    std::map<size_t, std::array<float, tileSize>*> asyncCompleted;
+    std::set<size_t> asyncPending;
+    int asyncGeneration = 0;
+
+    void consumeAsyncTiles();
+    void launchAsyncTile(size_t tile);
 };
 
 class AnnotationLocation
