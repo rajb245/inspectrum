@@ -584,7 +584,13 @@ void SpectrogramPlot::paintMidGL(QPainter &painter, QRect &rect, range_t<size_t>
 
     GLint vp[4];
     f->glGetIntegerv(GL_VIEWPORT, vp);
-    float vpW = vp[2], vpH = vp[3];
+    // GL_VIEWPORT is in physical device pixels, but uDstPos/uDstSize below are
+    // passed in logical widget coordinates.  On a HiDPI/Retina display these
+    // differ by devicePixelRatio, so divide the viewport back into logical
+    // space to keep the vertex shader's pixel->clip mapping consistent
+    // (otherwise every quad is scaled by 1/dpr and renders into a corner).
+    qreal dpr = painter.device()->devicePixelRatioF();
+    float vpW = vp[2] / dpr, vpH = vp[3] / dpr;
 
     glShader->bind();
     glShader->setUniformValue("uViewport", QVector2D(vpW, vpH));
