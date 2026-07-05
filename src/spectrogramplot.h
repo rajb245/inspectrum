@@ -178,6 +178,7 @@ private:
     int glCacheZoomLevel = 0;
     int glCacheNfftSkip = 0;
     bool glTileCacheDirty = false;
+    int glMaxTextureSize = 0;
 
     bool initGL(QOpenGLFunctions *f);
     void paintMidGL(QPainter &painter, QRect &rect, range_t<size_t> sampleRange);

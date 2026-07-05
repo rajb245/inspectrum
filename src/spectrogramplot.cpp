@@ -351,6 +351,12 @@ void SpectrogramPlot::paintMidCPU(QPainter &painter, QRect &rect, range_t<size_t
 
 bool SpectrogramPlot::initGL(QOpenGLFunctions *f)
 {
+    // Apple's GL caps tile textures at GL_MAX_TEXTURE_SIZE (typically 16384).
+    // FFT sizes that exceed it would silently fail to upload, leaving the
+    // sampler reading zero — which colormaps to red.  Cache the limit so
+    // paintMidGL can fall back to the CPU path when fftSize is too large.
+    f->glGetIntegerv(GL_MAX_TEXTURE_SIZE, &glMaxTextureSize);
+
     // Compile shader
     glShader = new QOpenGLShaderProgram();
     if (!glShader->addShaderFromSourceCode(QOpenGLShader::Vertex, glVertSrc) ||
@@ -545,6 +551,15 @@ void SpectrogramPlot::paintMidGL(QPainter &painter, QRect &rect, range_t<size_t>
             paintMidCPU(painter, rect, sampleRange);
             return;
         }
+    }
+
+    // Tiles are uploaded as fftSize × linesPerTile() textures; if either
+    // dimension exceeds GL_MAX_TEXTURE_SIZE the upload fails silently and
+    // the sampler returns zero (renders as solid red).  Fall back to CPU.
+    if (glMaxTextureSize > 0 &&
+        (fftSize > glMaxTextureSize || linesPerTile() > glMaxTextureSize)) {
+        paintMidCPU(painter, rect, sampleRange);
+        return;
     }
 
     // Invalidate caches if FFT parameters changed
