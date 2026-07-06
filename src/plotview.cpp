@@ -53,6 +53,7 @@ PlotView::PlotView(InputSource *input) : cursors(this), viewRange({0, 0})
     connect(&cursors, &Cursors::cursorsMoved, this, &PlotView::cursorsMoved);
 
     spectrogramPlot = new SpectrogramPlot(std::shared_ptr<SampleSource<std::complex<float>>>(mainSampleSource));
+    connect(spectrogramPlot, &SpectrogramPlot::annotationSelected, this, &PlotView::annotationSelected);
     auto tunerOutput = std::dynamic_pointer_cast<SampleSource<std::complex<float>>>(spectrogramPlot->output());
 
     enableScales(true);

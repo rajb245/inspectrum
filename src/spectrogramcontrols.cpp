@@ -23,6 +23,7 @@
 #include <QFileDialog>
 #include <QSettings>
 #include <QLabel>
+#include <QJsonArray>
 #include <cmath>
 #include "util.h"
 
@@ -106,6 +107,18 @@ SpectrogramControls::SpectrogramControls(const QString & title, QWidget * parent
     annoColorCheckBox = new QCheckBox(widget);
     layout->addRow(new QLabel(tr("Annotation Colors:")), annoColorCheckBox);
 
+    // Annotation inspector: click a box on the spectrogram to view its full
+    // SigMF fields here. Nested objects/arrays are collapsible tree items.
+    annotationTree = new QTreeWidget(widget);
+    annotationTree->setColumnCount(2);
+    annotationTree->setHeaderLabels({tr("Key"), tr("Value")});
+    annotationTree->setRootIsDecorated(true);      // show expand/collapse handles
+    annotationTree->setAlternatingRowColors(true);
+    annotationTree->setMinimumHeight(150);
+    annotationTree->setSelectionMode(QAbstractItemView::NoSelection);
+    layout->addRow(annotationTree);
+    clearAnnotation();
+
     widget->setLayout(layout);
     setWidget(widget);
 
@@ -123,6 +136,78 @@ void SpectrogramControls::clearCursorLabels()
     rateLabel->setText("");
     symbolPeriodLabel->setText("");
     symbolRateLabel->setText("");
+}
+
+void SpectrogramControls::clearAnnotation()
+{
+    annotationTree->clear();
+    auto *placeholder = new QTreeWidgetItem(annotationTree);
+    placeholder->setText(0, tr("Click an annotation to inspect"));
+    placeholder->setFirstColumnSpanned(true);
+    placeholder->setDisabled(true);
+}
+
+void SpectrogramControls::showAnnotation(QJsonObject fields)
+{
+    annotationTree->clear();
+    if (fields.isEmpty()) {
+        clearAnnotation();
+        return;
+    }
+
+    // Top-level keys become rows; nested objects/arrays recurse into children.
+    // Keys are sorted for stable ordering (QJsonObject already sorts by key).
+    for (auto it = fields.constBegin(); it != fields.constEnd(); ++it) {
+        populateJsonItem(nullptr, it.key(), it.value());
+    }
+    annotationTree->expandToDepth(0);
+    annotationTree->resizeColumnToContents(0);
+}
+
+void SpectrogramControls::populateJsonItem(QTreeWidgetItem *parent, const QString &key, const QJsonValue &value)
+{
+    // Create the row either as a child of `parent` or as a top-level row.
+    auto *item = parent ? new QTreeWidgetItem(parent)
+                        : new QTreeWidgetItem(annotationTree);
+    item->setText(0, key);
+
+    switch (value.type()) {
+    case QJsonValue::Object: {
+        const QJsonObject obj = value.toObject();
+        item->setText(1, tr("{%1}").arg(obj.size()));  // e.g. {6} = 6 keys
+        for (auto it = obj.constBegin(); it != obj.constEnd(); ++it)
+            populateJsonItem(item, it.key(), it.value());
+        break;
+    }
+    case QJsonValue::Array: {
+        const QJsonArray arr = value.toArray();
+        item->setText(1, tr("[%1]").arg(arr.size()));  // e.g. [3] = 3 elements
+        for (int i = 0; i < arr.size(); i++)
+            populateJsonItem(item, QString("[%1]").arg(i), arr.at(i));
+        break;
+    }
+    case QJsonValue::String:
+        item->setText(1, value.toString());
+        break;
+    case QJsonValue::Double: {
+        // Render integers without a trailing ".0"; keep full precision otherwise.
+        double d = value.toDouble();
+        if (d == std::floor(d) && std::abs(d) < 1e15)
+            item->setText(1, QString::number(static_cast<qint64>(d)));
+        else
+            item->setText(1, QString::number(d, 'g', 15));
+        break;
+    }
+    case QJsonValue::Bool:
+        item->setText(1, value.toBool() ? tr("true") : tr("false"));
+        break;
+    case QJsonValue::Null:
+        item->setText(1, tr("null"));
+        break;
+    default:
+        item->setText(1, tr("(unknown)"));
+        break;
+    }
 }
 
 void SpectrogramControls::cursorsStateChanged(int state)

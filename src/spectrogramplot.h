@@ -121,6 +121,11 @@ public:
     void enableAnnoColors(bool enabled);
     QString *mouseAnnotationComment(const QMouseEvent *event);
 
+signals:
+    // Emitted when the user clicks inside a SigMF annotation box; carries the
+    // complete annotation object so the controls dock can display its fields.
+    void annotationSelected(QJsonObject fields);
+
 public slots:
     void setFFTSize(int size);
     void setPowerMax(int power);

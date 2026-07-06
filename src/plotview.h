@@ -43,6 +43,8 @@ signals:
     void zoomOut();
     void fftSizeUp();
     void fftSizeDown();
+    // Relays SpectrogramPlot::annotationSelected up to the controls dock.
+    void annotationSelected(QJsonObject fields);
 
 public slots:
     void cursorsMoved();

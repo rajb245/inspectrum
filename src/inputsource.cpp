@@ -356,7 +356,7 @@ QJsonObject InputSource::readMetaData(const QString &filename)
                     boxColor = sigmf_color;
                 }
 
-                annotationList.emplace_back(sampleRange, frequencyRange, label, comment, boxColor);
+                annotationList.emplace_back(sampleRange, frequencyRange, label, comment, boxColor, sigmf_annotation);
             }
         }
     }

@@ -27,6 +27,9 @@
 #include <QSpinBox>
 #include <QCheckBox>
 #include <QLabel>
+#include <QTreeWidget>
+#include <QJsonObject>
+#include <QJsonValue>
 
 class SpectrogramControls : public QDockWidget
 {
@@ -47,6 +50,10 @@ public slots:
     void fftSizeUp();
     void fftSizeDown();
     void enableAnnotations(bool enabled);
+    // Populate the annotation inspector with a clicked SigMF annotation.
+    void showAnnotation(QJsonObject fields);
+    // Reset the inspector to its empty placeholder (e.g. on new file load).
+    void clearAnnotation();
 
 private slots:
     void fftSizeChanged(int value);
@@ -61,6 +68,8 @@ private:
     QFormLayout *layout;
     void clearCursorLabels();
     void fftOrZoomChanged(void);
+    // Recursively render a JSON value (scalar/object/array) into tree rows.
+    void populateJsonItem(QTreeWidgetItem *parent, const QString &key, const QJsonValue &value);
 
 public:
     QPushButton *fileOpenButton;
@@ -80,4 +89,5 @@ public:
     QCheckBox *annoLabelCheckBox;
     QCheckBox *commentsCheckBox;
     QCheckBox *annoColorCheckBox;
+    QTreeWidget *annotationTree;
 };

@@ -63,6 +63,7 @@ MainWindow::MainWindow()
     connect(plots, &PlotView::zoomOut, dock, &SpectrogramControls::zoomOut);
     connect(plots, &PlotView::fftSizeUp, dock, &SpectrogramControls::fftSizeUp);
     connect(plots, &PlotView::fftSizeDown, dock, &SpectrogramControls::fftSizeDown);
+    connect(plots, &PlotView::annotationSelected, dock, &SpectrogramControls::showAnnotation);
 
     // Set defaults after making connections so everything is in sync
     dock->setDefaults();
@@ -73,6 +74,9 @@ void MainWindow::openFile(QString fileName)
 {
     QString title="%1 jacobagilbert edition: %2";
     this->setWindowTitle(title.arg(QApplication::applicationName(),fileName.section('/',-1,-1)));
+
+    // Reset the annotation inspector; the previous file's selection is stale.
+    dock->clearAnnotation();
 
     // Try to parse osmocom_fft filenames and extract the sample rate and center frequency.
     // Example file name: "name-f2.411200e+09-s5.000000e+06-t20160807180210.cfile"

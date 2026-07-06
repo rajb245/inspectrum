@@ -27,6 +27,7 @@
 #include <QString>
 #include <QObject>
 #include <QColor>
+#include <QJsonObject>
 
 class Annotation
 {
@@ -36,11 +37,15 @@ public:
     QString label;
     QString comment;
     QColor boxColor;
+    // The complete SigMF annotation object as parsed from the .sigmf-meta
+    // file, retained so the UI can inspect arbitrary (including vendor-
+    // specific and nested) keys, not just the handful extracted above.
+    QJsonObject fields;
 
     Annotation(range_t<size_t> sampleRange, range_t<double>frequencyRange, QString label,
-               QString comment, QColor boxColor)
+               QString comment, QColor boxColor, QJsonObject fields = QJsonObject())
       : sampleRange(sampleRange), frequencyRange(frequencyRange), label(label),
-        comment(comment), boxColor(boxColor) {}
+        comment(comment), boxColor(boxColor), fields(fields) {}
 };
 
 template<typename T>
