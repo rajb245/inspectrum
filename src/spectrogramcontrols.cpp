@@ -36,6 +36,13 @@ SpectrogramControls::SpectrogramControls(const QString & title, QWidget * parent
     fileOpenButton = new QPushButton("Open file...", widget);
     layout->addRow(fileOpenButton);
 
+    reloadButton = new QPushButton("Reload file", widget);
+    layout->addRow(reloadButton);
+
+    autoReloadCheckBox = new QCheckBox(widget);
+    autoReloadCheckBox->setChecked(true);
+    layout->addRow(new QLabel(tr("Auto-reload on change:")), autoReloadCheckBox);
+
     sampleRate = new QLineEdit();
     auto double_validator = new QDoubleValidator(this);
     double_validator->setBottom(0.0);
@@ -125,6 +132,7 @@ SpectrogramControls::SpectrogramControls(const QString & title, QWidget * parent
     connect(fftSizeSlider, &QSlider::valueChanged, this, &SpectrogramControls::fftSizeChanged);
     connect(zoomLevelSlider, &QSlider::valueChanged, this, &SpectrogramControls::zoomLevelChanged);
     connect(fileOpenButton, &QPushButton::clicked, this, &SpectrogramControls::fileOpenButtonClicked);
+    connect(reloadButton, &QPushButton::clicked, this, &SpectrogramControls::reloadButtonClicked);
     connect(cursorsCheckBox, &QCheckBox::stateChanged, this, &SpectrogramControls::cursorsStateChanged);
     connect(powerMinSlider, &QSlider::valueChanged, this, &SpectrogramControls::powerMinChanged);
     connect(powerMaxSlider, &QSlider::valueChanged, this, &SpectrogramControls::powerMaxChanged);
@@ -275,6 +283,11 @@ void SpectrogramControls::powerMaxChanged(int value)
 {
     QSettings settings;
     settings.setValue("PowerMax", value);
+}
+
+void SpectrogramControls::reloadButtonClicked()
+{
+    emit reloadFile();
 }
 
 void SpectrogramControls::fileOpenButtonClicked()

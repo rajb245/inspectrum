@@ -21,6 +21,8 @@
 
 #include <QMainWindow>
 #include <QScrollArea>
+#include <QFileSystemWatcher>
+#include <QTimer>
 #include "spectrogramcontrols.h"
 #include "plotview.h"
 
@@ -34,13 +36,24 @@ public:
 
 public slots:
     void openFile(QString fileName);
+    void reloadFile();
     void setSampleRate(QString rate);
     void setSampleRate(double rate);
     void setFormat(QString fmt);
     void invalidateEvent() override;
 
+private slots:
+    void onWatchedFileChanged(const QString &path);
+    void setAutoReload(bool enabled);
+
 private:
+    void updateFileWatcher();
+
     SpectrogramControls *dock;
     PlotView *plots;
     InputSource *input;
+    QString currentFileName;
+    QFileSystemWatcher *fileWatcher;
+    QTimer *reloadDebounce;
+    bool autoReloadEnabled = true;
 };

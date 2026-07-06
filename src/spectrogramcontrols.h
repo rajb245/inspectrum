@@ -42,6 +42,7 @@ public:
 signals:
     void fftOrZoomChanged(int fftSize, int zoomLevel);
     void openFile(QString fileName);
+    void reloadFile();
 
 public slots:
     void timeSelectionChanged(float time);
@@ -61,6 +62,7 @@ private slots:
     void powerMinChanged(int value);
     void powerMaxChanged(int value);
     void fileOpenButtonClicked();
+    void reloadButtonClicked();
     void cursorsStateChanged(int state);
 
 private:
@@ -73,6 +75,8 @@ private:
 
 public:
     QPushButton *fileOpenButton;
+    QPushButton *reloadButton;
+    QCheckBox *autoReloadCheckBox;
     QLineEdit *sampleRate;
     QSlider *fftSizeSlider;
     QSlider *zoomLevelSlider;
