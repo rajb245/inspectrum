@@ -60,6 +60,7 @@ private:
 
     QJsonValue handleOpen(const QJsonValue &params, QJsonObject &errorOut);
     QJsonValue handleSeek(const QJsonValue &params, QJsonObject &errorOut);
+    QJsonValue handleSnapshot(const QJsonValue &params, QJsonObject &errorOut);
     QJsonValue handleGetState();
     QJsonObject buildDiscoverDoc();
     QJsonObject stateObject();

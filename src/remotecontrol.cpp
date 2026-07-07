@@ -27,12 +27,15 @@
 #include <QJsonArray>
 #include <QDir>
 #include <QFileInfo>
+#include <QBuffer>
+#include <QImage>
 
 // JSON-RPC 2.0 standard error codes (https://www.jsonrpc.org/specification)
 static const int kParseError     = -32700;
 static const int kInvalidRequest = -32600;
 static const int kMethodNotFound = -32601;
 static const int kInvalidParams  = -32602;
+static const int kInternalError  = -32603;
 
 RemoteControl::RemoteControl(MainWindow *mainWindow, PlotView *plotView, QObject *parent)
     : QObject(parent), mainWindow(mainWindow), plotView(plotView)
@@ -140,6 +143,9 @@ QJsonObject RemoteControl::dispatch(const QJsonObject &request)
     } else if (method == "seek") {
         QJsonValue result = handleSeek(params, error);
         return error.isEmpty() ? reply(result) : fail(error);
+    } else if (method == "snapshot") {
+        QJsonValue result = handleSnapshot(params, error);
+        return error.isEmpty() ? reply(result) : fail(error);
     } else if (method == "getState") {
         return reply(handleGetState());
     } else if (method == "rpc.discover") {
@@ -199,6 +205,45 @@ QJsonValue RemoteControl::handleSeek(const QJsonValue &params, QJsonObject &erro
 
     plotView->seekToSample(sample);
     return stateObject();
+}
+
+QJsonValue RemoteControl::handleSnapshot(const QJsonValue &params, QJsonObject &errorOut)
+{
+    QImage img = plotView->grabCanvas();
+    if (img.isNull()) {
+        errorOut = makeError(kInternalError, "failed to capture canvas");
+        return QJsonValue();
+    }
+
+    const QJsonObject obj = params.isObject() ? params.toObject() : QJsonObject();
+
+    // If a path is given, write the PNG to disk and return the path; otherwise
+    // return the PNG bytes inline as base64.
+    if (obj.contains("path")) {
+        const QString path = obj.value("path").toString();
+        if (path.isEmpty()) {
+            errorOut = makeError(kInvalidParams, "'path' must be a non-empty string");
+            return QJsonValue();
+        }
+        if (!img.save(path, "PNG")) {
+            errorOut = makeError(kInternalError, QString("failed to write PNG to %1").arg(path));
+            return QJsonValue();
+        }
+        return QJsonObject{{"path", path}, {"width", img.width()}, {"height", img.height()}};
+    }
+
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    if (!img.save(&buffer, "PNG")) {
+        errorOut = makeError(kInternalError, "failed to encode PNG");
+        return QJsonValue();
+    }
+    return QJsonObject{
+        {"png_base64", QString::fromLatin1(bytes.toBase64())},
+        {"width", img.width()},
+        {"height", img.height()},
+    };
 }
 
 QJsonValue RemoteControl::handleGetState()
@@ -265,6 +310,15 @@ QJsonObject RemoteControl::buildDiscoverDoc()
                     "Provide 'sample' (index) or 'seconds'."},
         {"params", QJsonArray{param("sample", "integer", false), param("seconds", "number", false)}},
         {"result", stateResult},
+    });
+    methods.append(QJsonObject{
+        {"name", "snapshot"},
+        {"summary", "Capture the current canvas (spectrogram + frequency/time "
+                    "axes + annotation boxes) as a PNG. With 'path', writes the "
+                    "file and returns {path,width,height}; otherwise returns the "
+                    "PNG inline as {png_base64,width,height}."},
+        {"params", QJsonArray{param("path", "string", false)}},
+        {"result", QJsonObject{{"name", "image"}, {"schema", QJsonObject{{"type", "object"}}}}},
     });
     methods.append(QJsonObject{
         {"name", "getState"},

@@ -18,11 +18,19 @@ query state.
 |--------|--------|---------|
 | `open` | `{ "path": string }` | state |
 | `seek` | `{ "sample": int }` **or** `{ "seconds": number }` | state |
+| `snapshot` | none, or `{ "path": string }` | image |
 | `getState` | none | state |
 | `rpc.discover` | none | [OpenRPC](https://spec.open-rpc.org/) document describing this API |
 
 `seek` scrolls so the offset is at the left edge; it rounds down to the nearest
 spectrogram column (`samplesPerColumn = fftSize·nfftSkip/zoomLevel`).
+
+`snapshot` captures the current canvas (spectrogram + frequency/time axes +
+annotation boxes) as a PNG. With `{ "path": ... }` it writes the file and
+returns `{ path, width, height }`; otherwise it returns the PNG inline as
+`{ png_base64, width, height }`. **The window must be visible and unoccluded**
+(the canvas is captured from the on-screen OpenGL surface), and macOS requires
+screen-recording permission for the process.
 
 **state** object:
 

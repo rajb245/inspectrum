@@ -21,6 +21,7 @@
 
 #include <QGraphicsView>
 #include <QPaintEvent>
+#include <QImage>
 
 #include "cursors.h"
 #include "inputsource.h"
@@ -41,6 +42,7 @@ public:
     void seekToSample(size_t sample);  // scroll so `sample` is at the left edge
     size_t viewStartSample();          // leftmost currently-visible sample
     size_t totalSamples();             // number of samples in the open file
+    QImage grabCanvas();               // current view incl. axes + annotations
     int currentFFTSize() const { return fftSize; }
     int currentZoomLevel() const { return zoomLevel; }
     int currentPowerMin() const { return powerMin; }

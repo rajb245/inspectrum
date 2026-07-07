@@ -22,6 +22,8 @@
 #include <fstream>
 #include <QtGlobal>
 #include <QApplication>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QClipboard>
 #include <QDebug>
 #include <QFileDialog>
@@ -745,6 +747,36 @@ size_t PlotView::viewStartSample()
 size_t PlotView::totalSamples()
 {
     return mainSampleSource ? mainSampleSource->count() : 0;
+}
+
+QImage PlotView::grabCanvas()
+{
+    // The spectrogram is drawn with raw OpenGL (via QPainter::beginNativePainting)
+    // into a QOpenGLWidget viewport, so neither QWidget::grab() (raster, misses
+    // GL) nor QOpenGLWidget::grabFramebuffer() (re-runs an empty paintGL, not our
+    // QGraphicsView paint) captures it. Instead grab the window's on-screen
+    // backing buffer via QScreen and crop to the viewport rect — this captures
+    // the composed GL + QPainter overlay (axes, annotation boxes, cursors) and
+    // works even when the window is occluded by another app.
+    QWidget *vp = viewport();
+    QScreen *screen = vp->screen();
+    if (screen == nullptr)
+        screen = QGuiApplication::primaryScreen();
+    if (screen == nullptr)
+        return QImage();
+
+    // Grab the desktop (winId 0) cropped to the viewport's global rect. Coords
+    // passed to grabWindow are relative to the screen's own geometry.
+    QPoint global = vp->mapToGlobal(QPoint(0, 0));
+    QRect sg = screen->geometry();
+    QPixmap pm = screen->grabWindow(0, global.x() - sg.x(), global.y() - sg.y(),
+                                    vp->width(), vp->height());
+
+    // The screen grab disturbs the OpenGL surface, so the viewport's next
+    // natural paint comes up blank. Force an immediate re-render to restore it.
+    vp->repaint();
+
+    return pm.toImage();
 }
 
 int PlotView::sampleToColumn(size_t sample)
