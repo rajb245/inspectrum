@@ -21,6 +21,15 @@
 #include <QtWidgets>
 #include <QPixmapCache>
 #include <QRubberBand>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QUrl>
+#include <QCloseEvent>
+#include <QSettings>
+#include <QScreen>
+#include <QGuiApplication>
+#include <QCoreApplication>
 #include <sstream>
 
 #include "mainwindow.h"
@@ -42,6 +51,14 @@ MainWindow::MainWindow()
 
     plots = new PlotView(input);
     setCentralWidget(plots);
+
+    // Accept files dropped from Finder. The central QGraphicsView (and its
+    // viewport) would otherwise consume the drag events, so disable drops on
+    // them and let the events bubble up to the main window's handlers.
+    setAcceptDrops(true);
+    plots->setAcceptDrops(false);
+    if (plots->viewport() != nullptr)
+        plots->viewport()->setAcceptDrops(false);
 
     // Watch the open file(s) so on-disk edits (e.g. regenerated annotations)
     // can trigger an automatic reload.  A short debounce coalesces the burst
@@ -81,6 +98,9 @@ MainWindow::MainWindow()
 
     // Set defaults after making connections so everything is in sync
     dock->setDefaults();
+
+    // Restore the last window size/position (or pick a sensible default).
+    restoreWindowGeometry();
 
     // Start the JSON-RPC control server (local socket).
     remote = new RemoteControl(this, plots, this);
@@ -136,6 +156,62 @@ void MainWindow::reloadFile()
 {
     if (!currentFileName.isEmpty())
         openFile(currentFileName);
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent *event)
+{
+    // Accept the drag only if it carries at least one local file.
+    const QMimeData *mime = event->mimeData();
+    if (!mime->hasUrls())
+        return;
+    for (const QUrl &url : mime->urls()) {
+        if (url.isLocalFile()) {
+            event->acceptProposedAction();
+            return;
+        }
+    }
+}
+
+void MainWindow::dropEvent(QDropEvent *event)
+{
+    // Open the first local file; inspectrum views one recording at a time.
+    for (const QUrl &url : event->mimeData()->urls()) {
+        if (url.isLocalFile()) {
+            event->acceptProposedAction();
+            openFile(url.toLocalFile());
+            return;
+        }
+    }
+}
+
+QString MainWindow::settingsFilePath()
+{
+    // Store settings in an INI file right next to the executable.
+    return QCoreApplication::applicationDirPath() + "/inspectrum.ini";
+}
+
+void MainWindow::restoreWindowGeometry()
+{
+    QSettings settings(settingsFilePath(), QSettings::IniFormat);
+    QByteArray geometry = settings.value("window/geometry").toByteArray();
+    if (!geometry.isEmpty() && restoreGeometry(geometry))
+        return;
+
+    // First run (or unreadable geometry): open at 80% of the available screen,
+    // centered, instead of the tiny layout-minimum default.
+    QScreen *screen = this->screen() ? this->screen() : QGuiApplication::primaryScreen();
+    if (screen == nullptr)
+        return;
+    QRect avail = screen->availableGeometry();
+    resize(avail.width() * 4 / 5, avail.height() * 4 / 5);
+    move(avail.center() - rect().center());
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    QSettings settings(settingsFilePath(), QSettings::IniFormat);
+    settings.setValue("window/geometry", saveGeometry());
+    QMainWindow::closeEvent(event);
 }
 
 void MainWindow::setAutoReload(bool enabled)

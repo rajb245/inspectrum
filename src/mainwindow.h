@@ -49,8 +49,18 @@ private slots:
     void onWatchedFileChanged(const QString &path);
     void setAutoReload(bool enabled);
 
+protected:
+    // Accept files dragged from Finder (or any file manager) onto the window.
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
+    // Persist the window geometry on close.
+    void closeEvent(QCloseEvent *event) override;
+
 private:
     void updateFileWatcher();
+    // Window-geometry persistence in an INI file next to the executable.
+    static QString settingsFilePath();
+    void restoreWindowGeometry();
 
     SpectrogramControls *dock;
     PlotView *plots;
