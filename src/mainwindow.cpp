@@ -24,6 +24,7 @@
 #include <sstream>
 
 #include "mainwindow.h"
+#include "remotecontrol.h"
 #include "util.h"
 
 MainWindow::MainWindow()
@@ -81,6 +82,13 @@ MainWindow::MainWindow()
     // Set defaults after making connections so everything is in sync
     dock->setDefaults();
 
+    // Start the JSON-RPC control server (local socket).
+    remote = new RemoteControl(this, plots, this);
+    QString remotePath = remote->start();
+    if (!remotePath.isEmpty())
+        qInfo().noquote() << "inspectrum: JSON-RPC control listening on" << remotePath;
+    else
+        qWarning() << "inspectrum: failed to start JSON-RPC control server";
 }
 
 void MainWindow::openFile(QString fileName)

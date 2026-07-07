@@ -727,6 +727,26 @@ void PlotView::enableAnnoColors(bool enabled)
     viewport()->update();
 }
 
+void PlotView::seekToSample(size_t sample)
+{
+    if (mainSampleSource == nullptr)
+        return;
+    size_t clamped = std::min(sample, mainSampleSource->count());
+    auto *hbar = horizontalScrollBar();
+    int col = std::min(sampleToColumn(clamped), hbar->maximum());
+    hbar->setValue(col);
+}
+
+size_t PlotView::viewStartSample()
+{
+    return columnToSample(horizontalScrollBar()->value());
+}
+
+size_t PlotView::totalSamples()
+{
+    return mainSampleSource ? mainSampleSource->count() : 0;
+}
+
 int PlotView::sampleToColumn(size_t sample)
 {
     return sample / samplesPerColumn();

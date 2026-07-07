@@ -37,6 +37,16 @@ public:
     PlotView(InputSource *input);
     void setSampleRate(double rate);
 
+    // Remote-control accessors (used by RemoteControl / JSON-RPC).
+    void seekToSample(size_t sample);  // scroll so `sample` is at the left edge
+    size_t viewStartSample();          // leftmost currently-visible sample
+    size_t totalSamples();             // number of samples in the open file
+    int currentFFTSize() const { return fftSize; }
+    int currentZoomLevel() const { return zoomLevel; }
+    int currentPowerMin() const { return powerMin; }
+    int currentPowerMax() const { return powerMax; }
+    double currentSampleRate() const { return sampleRate; }
+
 signals:
     void timeSelectionChanged(float time);
     void zoomIn();

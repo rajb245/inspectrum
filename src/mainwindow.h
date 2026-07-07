@@ -26,6 +26,8 @@
 #include "spectrogramcontrols.h"
 #include "plotview.h"
 
+class RemoteControl;
+
 class MainWindow : public QMainWindow, Subscriber
 {
     Q_OBJECT
@@ -33,6 +35,7 @@ class MainWindow : public QMainWindow, Subscriber
 public:
     MainWindow();
     void changeSampleRate(double rate);
+    QString currentFile() const { return currentFileName; }
 
 public slots:
     void openFile(QString fileName);
@@ -52,6 +55,7 @@ private:
     SpectrogramControls *dock;
     PlotView *plots;
     InputSource *input;
+    RemoteControl *remote;
     QString currentFileName;
     QFileSystemWatcher *fileWatcher;
     QTimer *reloadDebounce;

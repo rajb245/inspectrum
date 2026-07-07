@@ -41,6 +41,7 @@ list(APPEND inspectrum_sources
     plot.cpp
     plots.cpp
     plotview.cpp
+    remotecontrol.cpp
     samplebuffer.cpp
     samplesource.cpp
     spectrogramcontrols.cpp
@@ -52,9 +53,9 @@ list(APPEND inspectrum_sources
     util.cpp
 )
 
-find_package(Qt6 COMPONENTS Core Concurrent Widgets OpenGL OpenGLWidgets)
+find_package(Qt6 COMPONENTS Core Concurrent Widgets OpenGL OpenGLWidgets Network)
 if (NOT Qt6_FOUND)
-    find_package(Qt5 REQUIRED COMPONENTS Core Concurrent Widgets OpenGL)
+    find_package(Qt5 REQUIRED COMPONENTS Core Concurrent Widgets OpenGL Network)
 endif()
 find_package(OpenGL REQUIRED)
 
@@ -77,14 +78,14 @@ if (Qt6_FOUND)
         list(APPEND _qt6_gl_libs Qt6::OpenGLWidgets)
     endif()
     target_link_libraries(inspectrum
-        Qt6::Core Qt6::Widgets Qt6::Concurrent ${_qt6_gl_libs}
+        Qt6::Core Qt6::Widgets Qt6::Concurrent Qt6::Network ${_qt6_gl_libs}
         OpenGL::GL
         ${FFTW_LIBRARIES}
         ${LIQUID_LIBRARIES}
     )
 else()
     target_link_libraries(inspectrum
-        Qt5::Core Qt5::Widgets Qt5::Concurrent Qt5::OpenGL
+        Qt5::Core Qt5::Widgets Qt5::Concurrent Qt5::OpenGL Qt5::Network
         OpenGL::GL
         ${FFTW_LIBRARIES}
         ${LIQUID_LIBRARIES}
@@ -116,6 +117,7 @@ if (MSVC)
             "${_qt5_bindir}/Qt5Gui.dll"
             "${_qt5_bindir}/Qt5Widgets.dll"
             "${_qt5_bindir}/Qt5Concurrent.dll"
+            "${_qt5_bindir}/Qt5Network.dll"
             # Qt5Core deps
             "${_qt5_bindir}/zlib1.dll"
             "${_qt5_bindir}/double-conversion.dll"
