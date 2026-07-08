@@ -3,6 +3,23 @@ inspectrum is a tool for analysing captured signals, primarily from software-def
 
 ![inspectrum screenshot](/screenshot.jpg)
 
+## About this fork
+
+This is a downstream fork of inspectrum. Its lineage:
+
+1. **[miek/inspectrum](https://github.com/miek/inspectrum)** — the upstream project by Mike Walters, considered the community mainline.
+2. **[Jacob Gilbert](https://github.com/jacobagilbert)'s SigMF improvements** — SigMF annotation support (rendering annotation boxes, labels and colours from a recording's `.sigmf-meta`), maintained as a patch set rebased on upstream.
+3. **This fork** ([rajb245/inspectrum](https://github.com/rajb245/inspectrum)) — builds on both with Windows/macOS support and an assortment of quality-of-life tweaks:
+   - **Windows build support** (MSVC + vcpkg) — see [Build from source](#windows-msvc--vcpkg) below.
+   - **macOS support**, including an OpenGL-accelerated spectrogram renderer.
+   - **SigMF annotation inspector** — click an annotation box to view its full fields in a collapsible tree (nested objects/arrays expand), with a right-click *Copy value*.
+   - **[JSON-RPC remote-control interface](docs/remote-control.md)** — drive the app from any other program over a local socket (open a file, seek, snapshot the canvas to PNG, query state).
+   - **Drag-and-drop** file opening from Finder / file managers.
+   - **File reload** — a manual button plus auto-reload when the open recording changes on disk.
+   - **Session persistence** — window size/position and the last-opened file are remembered across runs (stored in an INI file next to the executable).
+
+These changes live on the `rebase-jacobagilbert` branch. Everything below documents inspectrum in general.
+
 ## Features
  * Large (100GB+) file support
  * Spectrogram with zoom/pan
