@@ -56,6 +56,8 @@ int main(int argc, char *argv[])
     const QStringList args = parser.positionalArguments();
     if (args.size()>=1)
         mainWin.openFile(args.at(0));
+    else
+        mainWin.openLastFile();
 
     if (parser.isSet(rateOption)) {
         bool ok;

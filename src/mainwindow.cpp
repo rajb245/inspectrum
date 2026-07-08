@@ -144,12 +144,23 @@ void MainWindow::openFile(QString fileName)
         input->openFile(fileName.toUtf8().constData());
         currentFileName = fileName;
         updateFileWatcher();
+        // Remember it so the next bare launch reopens it (see openLastFile).
+        QSettings(settingsFilePath(), QSettings::IniFormat)
+            .setValue("session/lastFile", fileName);
     }
     catch (const std::exception &ex)
     {
         QMessageBox msgBox(QMessageBox::Critical, "Inspectrum openFile error", QString("%1: %2").arg(fileName).arg(ex.what()));
         msgBox.exec();
     }
+}
+
+void MainWindow::openLastFile()
+{
+    QSettings settings(settingsFilePath(), QSettings::IniFormat);
+    QString last = settings.value("session/lastFile").toString();
+    if (!last.isEmpty() && QFileInfo::exists(last))
+        openFile(last);
 }
 
 void MainWindow::reloadFile()

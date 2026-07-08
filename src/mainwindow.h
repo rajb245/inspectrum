@@ -39,6 +39,9 @@ public:
 
 public slots:
     void openFile(QString fileName);
+    // Open the file recorded in the INI (used at startup when no file is given
+    // on the command line). No-op if unset or the file no longer exists.
+    void openLastFile();
     void reloadFile();
     void setSampleRate(QString rate);
     void setSampleRate(double rate);
