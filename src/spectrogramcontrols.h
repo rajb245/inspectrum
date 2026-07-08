@@ -64,6 +64,7 @@ private slots:
     void fileOpenButtonClicked();
     void reloadButtonClicked();
     void cursorsStateChanged(int state);
+    void annotationContextMenu(const QPoint &pos);
 
 private:
     QWidget *widget;

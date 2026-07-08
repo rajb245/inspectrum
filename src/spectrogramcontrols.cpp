@@ -24,6 +24,9 @@
 #include <QSettings>
 #include <QLabel>
 #include <QJsonArray>
+#include <QMenu>
+#include <QApplication>
+#include <QClipboard>
 #include <cmath>
 #include "util.h"
 
@@ -123,6 +126,9 @@ SpectrogramControls::SpectrogramControls(const QString & title, QWidget * parent
     annotationTree->setAlternatingRowColors(true);
     annotationTree->setMinimumHeight(150);
     annotationTree->setSelectionMode(QAbstractItemView::NoSelection);
+    annotationTree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(annotationTree, &QWidget::customContextMenuRequested,
+            this, &SpectrogramControls::annotationContextMenu);
     layout->addRow(annotationTree);
     clearAnnotation();
 
@@ -153,6 +159,19 @@ void SpectrogramControls::clearAnnotation()
     placeholder->setText(0, tr("Click an annotation to inspect"));
     placeholder->setFirstColumnSpanned(true);
     placeholder->setDisabled(true);
+}
+
+void SpectrogramControls::annotationContextMenu(const QPoint &pos)
+{
+    QTreeWidgetItem *item = annotationTree->itemAt(pos);
+    if (item == nullptr || item->isDisabled())  // ignore empty rows / placeholder
+        return;
+
+    QMenu menu;
+    QAction *copyValue = menu.addAction(tr("Copy value"));
+    QAction *chosen = menu.exec(annotationTree->viewport()->mapToGlobal(pos));
+    if (chosen == copyValue)
+        QApplication::clipboard()->setText(item->text(1));
 }
 
 void SpectrogramControls::showAnnotation(QJsonObject fields)
