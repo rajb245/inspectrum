@@ -13,7 +13,7 @@ This is a downstream fork of inspectrum. Its lineage:
    - **Windows build support** (MSVC + vcpkg) — see [Build from source](#windows-msvc--vcpkg) below.
    - **macOS support**, including an OpenGL-accelerated spectrogram renderer.
    - **SigMF annotation inspector** — click an annotation box to view its full fields in a collapsible tree (nested objects/arrays expand), with a right-click *Copy value*.
-   - **[JSON-RPC remote-control interface](docs/remote-control.md)** — drive the app from any other program over a local socket (open a file, seek, snapshot the canvas to PNG, query state).
+   - **[JSON-RPC remote-control interface](docs/remote-control.md)** — drive the app from any other program over a local socket (open a file, seek, snapshot the canvas to PNG, query state). This is useful for agentic workflows to do some analysis, update the metadata, and jog the display straight to the new boxes so the human operator can inspect the results.
    - **Drag-and-drop** file opening from Finder / file managers.
    - **File reload** — a manual button plus auto-reload when the open recording changes on disk.
    - **Session persistence** — window size/position and the last-opened file are remembered across runs (stored in an INI file next to the executable).
