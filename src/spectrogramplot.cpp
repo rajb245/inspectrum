@@ -826,15 +826,16 @@ int SpectrogramPlot::linesPerTile()
 
 bool SpectrogramPlot::mouseEvent(QEvent::Type type, QMouseEvent *event)
 {
-    // A plain left-click inside an annotation box selects it for inspection.
-    // Checked before the tuner so annotations stay clickable even when the
-    // tuner is enabled; tuner drags that start outside any box are unaffected.
+    // A left-click inside an annotation box selects it for inspection, but the
+    // event is NOT consumed: it falls through so the click can also start a
+    // drag-to-pan (or a tuner drag when the tuner is enabled). Selecting an
+    // annotation and dragging the spectrogram from the same spot both work.
     if (type == QEvent::MouseButtonPress && event->button() == Qt::LeftButton) {
         auto pos = event->pos();
         for (auto& a : visibleAnnotationLocations) {
             if (a.isInside(pos.x(), pos.y())) {
                 emit annotationSelected(a.annotation.fields);
-                return true;
+                break;
             }
         }
     }
