@@ -25,6 +25,7 @@
 #include <QGuiApplication>
 #include <QScreen>
 #include <QClipboard>
+#include <QClipboard>
 #include <QDebug>
 #include <QFileDialog>
 #include <QGridLayout>
@@ -148,6 +149,43 @@ void PlotView::contextMenuEvent(QContextMenuEvent * event)
             }
         );
         plotsMenu->addAction(action);
+    }
+
+    // On the spectrogram, offer to copy the clicked point's burst info
+    // (file, absolute frequency, time offset) to the clipboard.
+    if (selectedPlot == spectrogramPlot && mainSampleSource != nullptr && sampleRate > 0) {
+        const int plotTop = y;  // top of the spectrogram plot (from the loop above)
+        const int plotHeight = selectedPlot->height();
+        // Mirror paintFrequencyScale's pixel<->frequency mapping (real signals
+        // span 0..Fs/2 over the plot height, so the effective height doubles).
+        const double effHeight = mainSampleSource->realSignal() ? plotHeight * 2.0 : plotHeight;
+        const double bwPerPixel = sampleRate / effHeight;
+        const double freqOffset = (effHeight / 2.0 + plotTop - event->pos().y()) * bwPerPixel;
+        const double absFreq = mainSampleSource->getFrequency() + freqOffset;
+
+        const size_t sample = columnToSample(horizontalScrollBar()->value() + event->pos().x());
+        const double timeSec = static_cast<double>(sample) / sampleRate;
+
+        // Visible time extent (same mapping updateViewRange uses).
+        const size_t startSample = columnToSample(horizontalScrollBar()->value());
+        const size_t endSample = std::min(startSample + columnToSample(width()),
+                                          mainSampleSource->count());
+        const double viewStartSec = static_cast<double>(startSample) / sampleRate;
+        const double viewEndSec = static_cast<double>(endSample) / sampleRate;
+
+        const QString burst = QString("file: %1\nfrequency: %2 Hz\ntime: %3 s\n"
+                                      "view_start: %4 s\nview_end: %5 s")
+            .arg(mainSampleSource->getFilename())
+            .arg(QString::number(absFreq, 'f', 0))
+            .arg(QString::number(timeSec, 'f', 6))
+            .arg(QString::number(viewStartSec, 'f', 6))
+            .arg(QString::number(viewEndSec, 'f', 6));
+
+        auto copyBurst = new QAction("Copy burst info", &menu);
+        connect(copyBurst, &QAction::triggered, this, [burst]() {
+            QApplication::clipboard()->setText(burst);
+        });
+        menu.addAction(copyBurst);
     }
 
     // Add submenu for extracting symbols

@@ -41,6 +41,7 @@ private:
     std::unique_ptr<SampleAdapter> sampleAdapter;
     std::string _fmt;
     bool _realSignal = false;
+    QString sourceFilename;
 
     QJsonObject readMetaData(const QString &filename);
 
@@ -61,5 +62,8 @@ public:
     };
     float relativeBandwidth() {
         return 1;
+    }
+    QString getFilename() override {
+        return sourceFilename;
     }
 };

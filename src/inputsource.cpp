@@ -457,6 +457,7 @@ void InputSource::openFile(const char *filename)
 
     inputFile = file.release();
     mmapData = data;
+    sourceFilename = QString::fromUtf8(filename);
 
     invalidate();
 }

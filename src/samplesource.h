@@ -66,4 +66,5 @@ public:
     std::type_index sampleType() override;
     virtual bool realSignal() { return false; };
     double getFrequency();
+    virtual QString getFilename() { return QString(); }
 };
