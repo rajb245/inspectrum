@@ -289,29 +289,29 @@ bool PlotView::viewportEvent(QEvent *event) {
             }
             return true;
         }
-        // Ctrl+Scroll: zoom in time
+        // Ctrl+Scroll: zoom in time. Don't gate on zoomLevel/fftSize here — the
+        // zoom slider's own min/max is the authority, and the dock's
+        // zoomIn()/zoomOut() clamp setValue() to it (Qt drops a no-op setValue
+        // at the ends), so Cmd+scroll reaches exactly the slider's extents,
+        // including the negative (FFT-skip) zoom-out range.
         if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
-            bool canZoomIn = zoomLevel < fftSize;
-            bool canZoomOut = zoomLevel > 1;
             int delta = wheelEvent->angleDelta().y();
-            if ((delta > 0 && canZoomIn) || (delta < 0 && canZoomOut)) {
-                scrollZoomStepsAccumulated += delta;
+            scrollZoomStepsAccumulated += delta;
 
-                // `updateViewRange()` keeps the center sample in the same place after zoom. Apply
-                // a scroll adjustment to keep the sample under the mouse cursor in the same place instead.
+            // `updateViewRange()` keeps the center sample in the same place after zoom. Apply
+            // a scroll adjustment to keep the sample under the mouse cursor in the same place instead.
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-                zoomPos = wheelEvent->position().x();
+            zoomPos = wheelEvent->position().x();
 #else
-                zoomPos = wheelEvent->pos().x();
+            zoomPos = wheelEvent->pos().x();
 #endif
-                zoomSample = columnToSample(horizontalScrollBar()->value() + zoomPos);
-                if (scrollZoomStepsAccumulated >= 120) {
-                    scrollZoomStepsAccumulated -= 120;
-                    emit zoomIn();
-                } else if (scrollZoomStepsAccumulated <= -120) {
-                    scrollZoomStepsAccumulated += 120;
-                    emit zoomOut();
-                }
+            zoomSample = columnToSample(horizontalScrollBar()->value() + zoomPos);
+            if (scrollZoomStepsAccumulated >= 120) {
+                scrollZoomStepsAccumulated -= 120;
+                emit zoomIn();
+            } else if (scrollZoomStepsAccumulated <= -120) {
+                scrollZoomStepsAccumulated += 120;
+                emit zoomOut();
             }
             return true;
         }
