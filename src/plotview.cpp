@@ -278,7 +278,11 @@ bool PlotView::viewportEvent(QEvent *event) {
         QWheelEvent *wheelEvent = (QWheelEvent*)event;
         // Ctrl+Shift+Scroll: change FFT size (must be checked before Ctrl-only)
         if ((wheelEvent->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier)) == (Qt::ControlModifier | Qt::ShiftModifier)) {
+            // macOS routes Shift+scroll to the horizontal axis, so the delta can
+            // arrive in x() instead of y(); take whichever axis is non-zero.
             int delta = wheelEvent->angleDelta().y();
+            if (delta == 0)
+                delta = wheelEvent->angleDelta().x();
             scrollFftStepsAccumulated += delta;
             if (scrollFftStepsAccumulated >= 120) {
                 scrollFftStepsAccumulated -= 120;
