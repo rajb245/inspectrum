@@ -63,7 +63,10 @@ SpectrogramControls::SpectrogramControls(const QString & title, QWidget * parent
     layout->addRow(new QLabel(tr("FFT size:")), fftSizeSlider);
 
     zoomLevelSlider = new QSlider(Qt::Horizontal, widget);
-    zoomLevelSlider->setRange(-6, 10);
+    // Max zoom exponent matches the max FFT exponent (2^16 = 65536) so you can
+    // always zoom in to 1 sample/column regardless of FFT size; min(fftSize, ..)
+    // in fftOrZoomChanged still caps the effective zoom at the current FFT size.
+    zoomLevelSlider->setRange(-6, 16);
     zoomLevelSlider->setPageStep(1);
 
     layout->addRow(new QLabel(tr("Zoom:")), zoomLevelSlider);
