@@ -79,6 +79,7 @@ MainWindow::MainWindow()
     connect(dock, static_cast<void (SpectrogramControls::*)(int, int)>(&SpectrogramControls::fftOrZoomChanged), plots, &PlotView::setFFTAndZoom);
     connect(dock->powerMaxSlider, &QSlider::valueChanged, plots, &PlotView::setPowerMax);
     connect(dock->powerMinSlider, &QSlider::valueChanged, plots, &PlotView::setPowerMin);
+    connect(dock->colormapComboBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), plots, &PlotView::setColormapMode);
     connect(dock->cursorsCheckBox, &QCheckBox::stateChanged, plots, &PlotView::enableCursors);
     connect(dock->scalesCheckBox, &QCheckBox::stateChanged, plots, &PlotView::enableScales);
     connect(dock->annosCheckBox, &QCheckBox::stateChanged, plots, &PlotView::enableAnnotations);

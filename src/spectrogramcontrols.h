@@ -26,6 +26,7 @@
 #include <QSlider>
 #include <QSpinBox>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QLabel>
 #include <QTreeWidget>
 #include <QJsonObject>
@@ -83,6 +84,7 @@ public:
     QSlider *zoomLevelSlider;
     QSlider *powerMaxSlider;
     QSlider *powerMinSlider;
+    QComboBox *colormapComboBox;
     QCheckBox *cursorsCheckBox;
     QSpinBox *cursorSymbolsSpinBox;
     QLabel *rateLabel;

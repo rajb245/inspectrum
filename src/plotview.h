@@ -47,6 +47,7 @@ public:
     int currentZoomLevel() const { return zoomLevel; }
     int currentPowerMin() const { return powerMin; }
     int currentPowerMax() const { return powerMax; }
+    int currentColormapMode() const { return colormapMode; }
     double currentSampleRate() const { return sampleRate; }
 
 signals:
@@ -72,6 +73,7 @@ public slots:
     void setFFTAndZoom(int fftSize, int zoomLevel);
     void setPowerMin(int power);
     void setPowerMax(int power);
+    void setColormapMode(int mode);
 
 protected:
     void mouseMoveEvent(QMouseEvent *event) override;
@@ -96,6 +98,7 @@ private:
     int fftSize = 1024;
     int zoomLevel = 1;
     int nfftSkip = 1;
+    int colormapMode = 0;
     int powerMin;
     int powerMax;
     bool cursorsEnabled;

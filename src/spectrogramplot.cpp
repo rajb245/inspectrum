@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <functional>
 #include <cstdlib>
+#include <cmath>
 #include <limits>
 #include "util.h"
 
@@ -99,16 +100,75 @@ static const char *glFragSrc = R"(
     uniform sampler2D uColormap;
     uniform highp float uPowerMax;
     uniform highp float uPowerRange;
+    uniform int uColormapMode;   // 0 = default LUT, 1 = OKLab phase
     void main() {
-        // Texture is width=fftSize, height=linesPerTile.
+        // Texture is width=fftSize, height=linesPerTile, with two channels per
+        // texel: .r = log-power, .g = phase (radians).
         // vTexCoord.x = time fraction, vTexCoord.y = frequency fraction.
         // Swap to (freq, time) to match the transposed memory layout.
-        highp float power = texture2D(uFFTData, vec2(vTexCoord.y, vTexCoord.x)).r;
-        highp float norm = clamp((power - uPowerMax) * uPowerRange, 0.0, 1.0);
-        gl_FragColor = texture2D(uColormap, vec2(norm, 0.5));
+        highp vec2 cell = texture2D(uFFTData, vec2(vTexCoord.y, vTexCoord.x)).rg;
+        highp float norm = clamp((cell.r - uPowerMax) * uPowerRange, 0.0, 1.0);
+
+        if (uColormapMode == 0) {
+            gl_FragColor = texture2D(uColormap, vec2(norm, 0.5));
+            return;
+        }
+
+        // OKLab phase colormap: lightness/chroma from magnitude, hue from phase.
+        // norm is 0 for loud / 1 for quiet (see uPowerRange sign), so invert it
+        // to a natural loudness where strong signal -> bright & colourful.
+        highp float v = 1.0 - norm;
+        highp float L = 0.08 + 0.87 * v;
+        highp float C = 0.13 * v;
+        highp float a = C * cos(cell.g);
+        highp float b = C * sin(cell.g);
+        highp float l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+        highp float m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+        highp float s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+        highp float l = l_ * l_ * l_;
+        highp float m = m_ * m_ * m_;
+        highp float s = s_ * s_ * s_;
+        highp vec3 rgb = vec3(
+            4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+           -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+           -0.0041960863 * l - 0.7034186147 * m + 1.7076764555 * s);
+        rgb = clamp(rgb, 0.0, 1.0);
+        // sRGB gamma encode (branchless per channel).
+        highp vec3 lo = rgb * 12.92;
+        highp vec3 hi = 1.055 * pow(rgb, vec3(1.0 / 2.4)) - 0.055;
+        rgb = mix(hi, lo, step(rgb, vec3(0.0031308)));
+        gl_FragColor = vec4(rgb, 1.0);
     }
 )";
 
+
+// CPU equivalent of the OKLab phase colormap implemented in the fragment
+// shader: lightness/chroma from normalized magnitude v, hue from phase.
+static QRgb oklabPhaseColor(float v, float phase)
+{
+    float L = 0.08f + 0.87f * v;
+    float C = 0.13f * v;
+    float a = C * std::cos(phase);
+    float b = C * std::sin(phase);
+    float l_ = L + 0.3963377774f * a + 0.2158037573f * b;
+    float m_ = L - 0.1055613458f * a - 0.0638541728f * b;
+    float s_ = L - 0.0894841775f * a - 1.2914855480f * b;
+    float l = l_ * l_ * l_;
+    float m = m_ * m_ * m_;
+    float s = s_ * s_ * s_;
+    float rgb[3] = {
+         4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * s,
+        -1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s,
+        -0.0041960863f * l - 0.7034186147f * m + 1.7076764555f * s};
+    int out[3];
+    for (int i = 0; i < 3; i++) {
+        float c = clamp(rgb[i], 0.0f, 1.0f);
+        c = (c <= 0.0031308f) ? (12.92f * c)
+                              : (1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f);
+        out[i] = static_cast<int>(clamp(c, 0.0f, 1.0f) * 255.0f + 0.5f);
+    }
+    return qRgb(out[0], out[1], out[2]);
+}
 
 SpectrogramPlot::SpectrogramPlot(std::shared_ptr<SampleSource<std::complex<float>>> src) : Plot(src), inputSource(src), fftSize(512), tuner(fftSize, this)
 {
@@ -418,9 +478,10 @@ GLuint SpectrogramPlot::uploadFFTToGL(QOpenGLFunctions *f, const float *data)
     GLuint tex;
     f->glGenTextures(1, &tex);
     f->glBindTexture(GL_TEXTURE_2D, tex);
-    f->glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F,
+    // Two floats per texel: .r = log-power, .g = phase.
+    f->glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F,
                     fftSize, linesPerTile(), 0,
-                    GL_RED, GL_FLOAT, data);
+                    GL_RG, GL_FLOAT, data);
     f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -432,7 +493,7 @@ GLuint SpectrogramPlot::uploadFFTToGL(QOpenGLFunctions *f, const float *data)
 // Move completed async results into fftCache (main thread only).
 void SpectrogramPlot::consumeAsyncTiles()
 {
-    std::map<size_t, std::array<float, tileSize>*> ready;
+    std::map<size_t, std::array<float, tileSize * 2>*> ready;
     {
         QMutexLocker lock(&asyncMutex);
         ready.swap(asyncCompleted);
@@ -507,8 +568,8 @@ void SpectrogramPlot::launchAsyncTile(size_t tileID)
                                   &fftwIn[line * fftSz], &fftwOut[line * fftSz]);
         }
 
-        // Phase 3: log-power conversion.
-        auto *result = new std::array<float, tileSize>;
+        // Phase 3: log-power + phase, interleaved as [power, phase] per bin.
+        auto *result = new std::array<float, tileSize * 2>;
         float *ptr = result->data();
         const float inv = 1.0f / fftSz;
         const float logMul = 10.0f / fast_log2(10.0f);
@@ -518,7 +579,9 @@ void SpectrogramPlot::launchAsyncTile(size_t tileID)
                 int k = i ^ (fftSz >> 1);
                 float re = lineOut[k][0] * inv;
                 float im = lineOut[k][1] * inv;
-                ptr[line * fftSz + i] = fast_log2(re * re + im * im) * logMul;
+                int idx = (line * fftSz + i) * 2;
+                ptr[idx]     = fast_log2(re * re + im * im) * logMul;
+                ptr[idx + 1] = atan2f(im, re);
             }
         }
 
@@ -597,6 +660,7 @@ void SpectrogramPlot::paintMidGL(QPainter &painter, QRect &rect, range_t<size_t>
     glShader->setUniformValue("uPowerMax", powerMax);
     glShader->setUniformValue("uPowerRange",
         -1.0f / std::abs(static_cast<int>(powerMin - powerMax)));
+    glShader->setUniformValue("uColormapMode", colormapMode);
 
     f->glActiveTexture(GL_TEXTURE1);
     f->glBindTexture(GL_TEXTURE_2D, glColormapTex);
@@ -686,11 +750,16 @@ QPixmap* SpectrogramPlot::getPixmapTile(size_t tile)
     for (int y = 0; y < fftSize; y++) {
         auto scanLine = (QRgb*)image.scanLine(fftSize - y - 1);
         for (int x = 0; x < linesPerTile(); x++) {
-            float *fftLine = &fftTile[x * fftSize];
-            float normPower = (fftLine[y] - powerMax) * powerRange;
-            normPower = clamp(normPower, 0.0f, 1.0f);
+            // Tile is interleaved [power, phase] per bin.
+            int idx = (x * fftSize + y) * 2;
+            float normPower = clamp((fftTile[idx] - powerMax) * powerRange, 0.0f, 1.0f);
 
-            scanLine[x] = colormap[(uint8_t)(normPower * (256 - 1))];
+            if (colormapMode == 0) {
+                scanLine[x] = colormap[(uint8_t)(normPower * (256 - 1))];
+            } else {
+                // normPower is 0 for loud / 1 for quiet; invert to loudness.
+                scanLine[x] = oklabPhaseColor(1.0f - normPower, fftTile[idx + 1]);
+            }
         }
     }
     obj->convertFromImage(image);
@@ -700,7 +769,7 @@ QPixmap* SpectrogramPlot::getPixmapTile(size_t tile)
 
 float* SpectrogramPlot::getFFTTile(size_t tile)
 {
-    std::array<float, tileSize>* obj = fftCache.object(TileCacheKey(fftSize, zoomLevel, nfftSkip, tile));
+    std::array<float, tileSize * 2>* obj = fftCache.object(TileCacheKey(fftSize, zoomLevel, nfftSkip, tile));
     if (obj != nullptr)
         return obj->data();
 
@@ -739,8 +808,8 @@ float* SpectrogramPlot::getFFTTile(size_t tile)
                               &bIn[line * fftSize], &bOut[line * fftSize]);
     }
 
-    // Phase 3: log-power conversion.
-    auto *destStorage = new std::array<float, tileSize>;
+    // Phase 3: log-power + phase, interleaved as [power, phase] per bin.
+    auto *destStorage = new std::array<float, tileSize * 2>;
     float *dest = destStorage->data();
     const float inv = 1.0f / fftSize;
     const float logMul = 10.0f / fast_log2(10.0f);
@@ -750,7 +819,9 @@ float* SpectrogramPlot::getFFTTile(size_t tile)
             int k = i ^ (fftSize >> 1);
             float re = lineOut[k][0] * inv;
             float im = lineOut[k][1] * inv;
-            dest[line * fftSize + i] = fast_log2(re * re + im * im) * logMul;
+            int idx = (line * fftSize + i) * 2;
+            dest[idx]     = fast_log2(re * re + im * im) * logMul;
+            dest[idx + 1] = atan2f(im, re);
         }
     }
 
@@ -944,6 +1015,15 @@ void SpectrogramPlot::setZoomLevel(int zoom)
 void SpectrogramPlot::setSkip(int skip)
 {
     nfftSkip = skip;
+}
+
+void SpectrogramPlot::setColormapMode(int mode)
+{
+    colormapMode = mode;
+    // The GL tile textures hold raw [power, phase] and stay valid (the shader
+    // branches on the mode uniform); only the CPU-colored pixmaps are stale.
+    pixmapCache.clear();
+    emit repaint();
 }
 
 void SpectrogramPlot::setSampleRate(double rate)

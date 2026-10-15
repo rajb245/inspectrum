@@ -132,11 +132,15 @@ public slots:
     void setPowerMin(int power);
     void setZoomLevel(int zoom);
     void setSkip(int skip);
+    void setColormapMode(int mode);  // 0 = default, 1 = OKLab phase
     void tunerMoved();
 
 private:
     const int linesPerGraduation = 50;
-    static const int tileSize = 65536; // This must be a multiple of the maximum FFT size
+    // Number of single-channel floats per tile; must be a multiple of the
+    // maximum FFT size. Each bin stores two floats (log-power, phase), so the
+    // backing arrays below are sized tileSize * 2.
+    static const int tileSize = 65536;
 
     std::shared_ptr<SampleSource<std::complex<float>>> inputSource;
     std::vector<AnnotationLocation> visibleAnnotationLocations;
@@ -145,8 +149,9 @@ private:
     bool useBatchFFT = false;  // set by auto-tune in setFFTSize
     std::shared_ptr<std::vector<float>> window;
     QCache<TileCacheKey, QPixmap> pixmapCache;
-    QCache<TileCacheKey, std::array<float, tileSize>> fftCache;
+    QCache<TileCacheKey, std::array<float, tileSize * 2>> fftCache;  // interleaved [power, phase]
     uint colormap[256];
+    int colormapMode = 0;  // 0 = default colormap, 1 = OKLab phase colormap
 
     int fftSize;
     int zoomLevel;
@@ -193,7 +198,7 @@ private:
 
     // Async tile computation (off the UI thread)
     QMutex asyncMutex;
-    std::map<size_t, std::array<float, tileSize>*> asyncCompleted;
+    std::map<size_t, std::array<float, tileSize * 2>*> asyncCompleted;
     std::set<size_t> asyncPending;
     int asyncGeneration = 0;
 

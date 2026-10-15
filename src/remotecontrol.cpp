@@ -143,6 +143,9 @@ QJsonObject RemoteControl::dispatch(const QJsonObject &request)
     } else if (method == "seek") {
         QJsonValue result = handleSeek(params, error);
         return error.isEmpty() ? reply(result) : fail(error);
+    } else if (method == "setColormap") {
+        QJsonValue result = handleSetColormap(params, error);
+        return error.isEmpty() ? reply(result) : fail(error);
     } else if (method == "snapshot") {
         QJsonValue result = handleSnapshot(params, error);
         return error.isEmpty() ? reply(result) : fail(error);
@@ -207,6 +210,32 @@ QJsonValue RemoteControl::handleSeek(const QJsonValue &params, QJsonObject &erro
     return stateObject();
 }
 
+QJsonValue RemoteControl::handleSetColormap(const QJsonValue &params, QJsonObject &errorOut)
+{
+    if (!params.isObject()) {
+        errorOut = makeError(kInvalidParams, "params must be an object with 'mode' or 'name'");
+        return QJsonValue();
+    }
+    const QJsonObject obj = params.toObject();
+
+    int mode = -1;
+    if (obj.contains("mode")) {
+        mode = obj.value("mode").toInt(-1);
+    } else if (obj.contains("name")) {
+        const QString name = obj.value("name").toString().toLower();
+        if (name == "default") mode = 0;
+        else if (name == "oklab" || name == "phase") mode = 1;
+    }
+    if (mode != 0 && mode != 1) {
+        errorOut = makeError(kInvalidParams,
+            "provide 'mode' (0=default, 1=oklab) or 'name' (\"default\"|\"oklab\")");
+        return QJsonValue();
+    }
+
+    plotView->setColormapMode(mode);
+    return stateObject();
+}
+
 QJsonValue RemoteControl::handleSnapshot(const QJsonValue &params, QJsonObject &errorOut)
 {
     QImage img = plotView->grabCanvas();
@@ -262,6 +291,7 @@ QJsonObject RemoteControl::stateObject()
         {"zoomLevel", plotView->currentZoomLevel()},
         {"powerMin", plotView->currentPowerMin()},
         {"powerMax", plotView->currentPowerMax()},
+        {"colormap", plotView->currentColormapMode()},
     };
 }
 
@@ -293,6 +323,7 @@ QJsonObject RemoteControl::buildDiscoverDoc()
             {"zoomLevel", QJsonObject{{"type", "integer"}}},
             {"powerMin", QJsonObject{{"type", "integer"}}},
             {"powerMax", QJsonObject{{"type", "integer"}}},
+            {"colormap", QJsonObject{{"type", "integer"}}},
         }},
     };
     QJsonObject stateResult{{"name", "state"}, {"schema", stateSchema}};
@@ -309,6 +340,13 @@ QJsonObject RemoteControl::buildDiscoverDoc()
         {"summary", "Scroll the view so the given offset is at the left edge. "
                     "Provide 'sample' (index) or 'seconds'."},
         {"params", QJsonArray{param("sample", "integer", false), param("seconds", "number", false)}},
+        {"result", stateResult},
+    });
+    methods.append(QJsonObject{
+        {"name", "setColormap"},
+        {"summary", "Select the spectrogram colormap: mode 0 (default) or 1 "
+                    "(OKLab phase), or name \"default\"/\"oklab\"."},
+        {"params", QJsonArray{param("mode", "integer", false), param("name", "string", false)}},
         {"result", stateResult},
     });
     methods.append(QJsonObject{

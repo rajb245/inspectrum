@@ -562,6 +562,14 @@ void PlotView::setPowerMax(int power)
     updateView();
 }
 
+void PlotView::setColormapMode(int mode)
+{
+    colormapMode = mode;
+    if (spectrogramPlot != nullptr)
+        spectrogramPlot->setColormapMode(mode);
+    updateView();
+}
+
 void PlotView::paintEvent(QPaintEvent *event)
 {
     if (mainSampleSource == nullptr) return;

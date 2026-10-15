@@ -80,6 +80,11 @@ SpectrogramControls::SpectrogramControls(const QString & title, QWidget * parent
     scalesCheckBox->setCheckState(Qt::Checked);
     layout->addRow(new QLabel(tr("Scales:")), scalesCheckBox);
 
+    colormapComboBox = new QComboBox(widget);
+    colormapComboBox->addItem(tr("Default"));          // index 0
+    colormapComboBox->addItem(tr("Phase (OKLab)"));    // index 1
+    layout->addRow(new QLabel(tr("Colormap:")), colormapComboBox);
+
     // Time selection settings
     layout->addRow(new QLabel()); // TODO: find a better way to add an empty row?
     layout->addRow(new QLabel(tr("<b>Time selection</b>")));
